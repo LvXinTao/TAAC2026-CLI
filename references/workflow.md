@@ -30,9 +30,9 @@ If Playwright login triggers rate limiting or frequent verification, use the use
 3. Refresh the page.
 4. Select the `task?pageNum=0&pageSize=...` request.
 5. Copy either the `cookie` request header value or the whole request via `Copy as cURL`.
-6. Save it to `taiji-cookie.txt` in the working directory.
+6. Save it to `taiji-output/secrets/taiji-cookie.txt`.
 
-Treat `taiji-cookie.txt` as a secret. Add it to `.gitignore`.
+Treat cookies as secrets. Add `taiji-output/` to `.gitignore`.
 
 ## Output Shape
 
@@ -46,6 +46,10 @@ The bundled scraper exports:
 - `code/<jobId>/job-detail.json`: Job detail response containing `trainFiles`.
 - `code/<jobId>/train-files.json`: training code metadata and best-effort download status.
 - `code/<jobId>/files/...`: downloaded training code files when `trainFiles[].path` is directly fetchable. Preserve path structure when possible.
+- `browser-profile/`: Playwright persistent profile.
+- `config-diffs/`: output for config diff files when `--out` is a relative path.
+- `submit-bundle/` and `submit-live/`: local submit preparation and live submit/run records.
+- `secrets/`: recommended local location for cookies or captured headers.
 
 Use `jobId + instanceId + metric + series + step` as the stable row identity for metric analysis.
 
@@ -58,7 +62,7 @@ node compare-config-yaml.mjs old-config.yaml new-config.yaml
 node compare-config-yaml.mjs old-config.yaml new-config.yaml --json --out diff.json
 ```
 
-The tool parses YAML and reports semantic changes by path. It handles nested maps and arrays, including paths like `optimizer.lr`, `features[2]`, and `model.layers[1].dropout`.
+The tool parses YAML and reports semantic changes by path. It handles nested maps and arrays, including paths like `optimizer.lr`, `features[2]`, and `model.layers[1].dropout`. Relative `--out` values are written under `taiji-output/`; a bare filename such as `diff.json` becomes `taiji-output/config-diffs/diff.json`.
 
 ## Known Failure Modes
 

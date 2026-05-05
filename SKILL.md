@@ -1,6 +1,6 @@
 ---
 name: taiji-metrics-scraper
-description: Scrape Tencent TAAC / Taiji training pages for Job IDs, Job Names, Job Descriptions, all training code files, instances, checkpoints, logs, and all Metrics; compare YAML configs such as config.yaml across versions; and prepare local-agent TAAC experiment submissions. Use when the user asks to crawl taiji.algo.qq.com/training, TAAC training jobs, Tencent Angel Machine Learning Platform outputs, ckpt pages, pod logs, config.yaml or arbitrary job code files, compare two config.yaml files, tf_events metrics, or wants a reusable one-click backend/script workflow for TAAC metrics, logs, code files, config diffs, or preparing code/config submission to Taiji.
+description: Scrape Tencent TAAC / Taiji training pages for Job IDs, Job Names, Job Descriptions, all training code files, instances, checkpoints, logs, and all Metrics; compare YAML configs such as config.yaml across versions; prepare TAAC experiment submissions; and optionally upload/start Taiji jobs through the captured API flow. Use when the user asks to crawl taiji.algo.qq.com/training, TAAC training jobs, Tencent Angel Machine Learning Platform outputs, ckpt pages, pod logs, config.yaml or arbitrary job code files, compare two config.yaml files, tf_events metrics, or wants a reusable backend/script workflow for TAAC metrics, logs, code files, config diffs, or code/config submission to Taiji.
 ---
 
 # TAAC Metrics Scraper
@@ -11,7 +11,7 @@ description: Scrape Tencent TAAC / Taiji training pages for Job IDs, Job Names, 
 2. Create or reuse a workspace-local Node scraper. Prefer copying `scripts/scrape-taiji.mjs` from this skill into the workspace.
 3. Create a minimal `package.json` using `references/package-json.md` if the workspace does not already have one.
 4. Install dependencies with `npm install` and, if needed, `npx playwright install chromium`.
-5. Add `taiji-cookie.txt`, `.taiji-browser-profile/`, and output directories to `.gitignore`.
+5. Add `taiji-output/` to `.gitignore`. Scripts default all local outputs, browser profile, submit bundles, and live submit records under this directory.
 6. Capture a browser Cookie from the user if Playwright login triggers verification or rate limiting.
 7. Run the scraper and verify output row counts.
 
@@ -20,19 +20,19 @@ description: Scrape Tencent TAAC / Taiji training pages for Job IDs, Job Names, 
 For all training jobs:
 
 ```powershell
-node scrape-taiji.mjs --all --cookie-file taiji-cookie.txt --headless
+node scrape-taiji.mjs --all --cookie-file taiji-output/secrets/taiji-cookie.txt --headless
 ```
 
 For servers where Chromium page fetch fails, use backend direct HTTP mode:
 
 ```powershell
-node scrape-taiji.mjs --all --cookie-file taiji-cookie.txt --direct
+node scrape-taiji.mjs --all --cookie-file taiji-output/secrets/taiji-cookie.txt --direct
 ```
 
 For a single ckpt page:
 
 ```powershell
-node scrape-taiji.mjs --url "<TAAC_CKPT_URL>" --cookie-file taiji-cookie.txt --headless
+node scrape-taiji.mjs --url "<TAAC_CKPT_URL>" --cookie-file taiji-output/secrets/taiji-cookie.txt --headless
 ```
 
 Compare two YAML config files:
@@ -46,6 +46,18 @@ Prepare a local-agent experiment submission package:
 
 ```powershell
 node prepare-taiji-submit.mjs --template-job-url "<TEMPLATE_JOB_URL>" --zip ".\artifacts\exp.zip" --config ".\configs\exp.yaml" --name "exp_017" --description "try focal loss" --run
+```
+
+Dry-run live submit plan:
+
+```powershell
+node submit-taiji.mjs --bundle taiji-output/submit-bundle --cookie-file taiji-output/secrets/taiji-cookie.txt --template-job-internal-id 58620
+```
+
+Live upload/create/run requires explicit confirmation:
+
+```powershell
+node submit-taiji.mjs --bundle taiji-output/submit-bundle --cookie-file taiji-output/secrets/taiji-cookie.txt --template-job-internal-id 58620 --execute --yes --run
 ```
 
 Use longer auth waiting only when interactive login is required:
@@ -74,10 +86,17 @@ The scraper writes to `taiji-output/` by default:
 - `code/<jobId>/job-detail.json`: full Job detail response, including `trainFiles` when available.
 - `code/<jobId>/train-files.json`: train file metadata plus download status.
 - `code/<jobId>/files/...`: best-effort downloaded training code files, preserving path structure when possible.
+- `browser-profile/`: Playwright persistent browser state for interactive auth fallback.
+- `config-diffs/`: config diff files when `compare-config-yaml.mjs --out <file>` is used with a relative path.
+- `submit-bundle/`: default prepared local submission bundle.
+- `submit-live/<timestamp>/`: dry-run plans and live submit/run results.
+- `secrets/`: recommended local location for `taiji-cookie.txt` or captured headers. Never commit this directory.
 
 ## Config Diff Tool
 
 Use `scripts/compare-config-yaml.mjs` to compare two YAML files semantically instead of line-by-line. It parses YAML, flattens nested maps/lists into stable paths, and reports `added`, `removed`, and `changed` entries.
+
+When `--out` is a relative path, the diff is written under `taiji-output/`; a bare filename such as `diff.json` becomes `taiji-output/config-diffs/diff.json`.
 
 Use path identity like `model.lr`, `train.batch_size`, and `layers[1]` when explaining changes. Prefer `--json` when downstream scripts need machine-readable output.
 
@@ -85,7 +104,9 @@ Use `jobId + instanceId` to distinguish multiple runs under one Job ID. Use `job
 
 ## Submit Training Workflow
 
-Use `scripts/prepare-taiji-submit.mjs` when a local agent needs to package the intended Taiji submission before a live upload/run workflow is calibrated. It validates the code zip and config file, records the Git commit/status when available, writes a manifest, and captures whether the agent should run after submission.
+Use `scripts/prepare-taiji-submit.mjs` when a local agent needs to package the intended Taiji submission. It validates the code zip and config file, records the Git commit/status when available, writes a manifest, and captures whether the agent should run after submission.
+
+Use `scripts/submit-taiji.mjs` for the captured Taiji API path. It is dry-run by default. Live execution requires `--execute --yes`, and starting training additionally requires `--run`.
 
 The intended live workflow is:
 
@@ -97,7 +118,7 @@ The intended live workflow is:
 6. Submit the new Job.
 7. Optionally click Run and return the new Job ID, Job URL, and instance result.
 
-Do not enable live browser/API submission until at least one successful manual "Copy Job -> upload zip/config -> submit -> run" flow has been captured from DevTools. The unresolved pieces are the file upload endpoint/payload and stable UI selectors. Load `references/submit-workflow.md` before implementing or debugging live submission.
+Live submit uses the captured "Copy Job -> upload zip/config to COS -> submit -> run" flow. Load `references/submit-workflow.md` before debugging live submission.
 
 ## Implementation Notes
 

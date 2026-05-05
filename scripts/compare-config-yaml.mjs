@@ -1,6 +1,8 @@
-import { readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import yaml from "js-yaml";
+
+const DEFAULT_OUT_DIR = "taiji-output/config-diffs";
 
 function parseArgs(argv) {
   const args = {
@@ -17,10 +19,17 @@ function parseArgs(argv) {
   }
 
   if (files.length !== 2) {
-    throw new Error("Usage: node compare-config-yaml.mjs <old-config.yaml> <new-config.yaml> [--json] [--out diff.json]");
+    throw new Error("Usage: node compare-config-yaml.mjs <old-config.yaml> <new-config.yaml> [--json] [--out diff.json]. Relative --out paths are written under taiji-output/.");
   }
 
   return { ...args, oldFile: files[0], newFile: files[1] };
+}
+
+function resolveTaijiOutputFile(outPath) {
+  if (path.isAbsolute(outPath)) return outPath;
+  if (outPath.split(/[\\/]/)[0] === "taiji-output") return path.resolve(outPath);
+  if (path.dirname(outPath) === ".") return path.resolve(DEFAULT_OUT_DIR, outPath);
+  return path.resolve("taiji-output", outPath);
 }
 
 function formatPath(parts) {
@@ -127,8 +136,14 @@ async function main() {
   };
 
   const output = args.json ? `${JSON.stringify(result, null, 2)}\n` : renderMarkdown(result);
-  if (args.out) await writeFile(args.out, output, "utf8");
-  else process.stdout.write(output);
+  if (args.out) {
+    const outPath = resolveTaijiOutputFile(args.out);
+    await mkdir(path.dirname(outPath), { recursive: true });
+    await writeFile(outPath, output, "utf8");
+    console.error(`Wrote config diff: ${outPath}`);
+  } else {
+    process.stdout.write(output);
+  }
 }
 
 main().catch((error) => {

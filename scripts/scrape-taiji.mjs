@@ -6,6 +6,7 @@ const DEFAULT_URL =
   "https://taiji.algo.qq.com/training/ckpt/angel_training_ams_2026_1029735554728157691_20260505053802_1b5f3f87/56737/95cdb55f9de411b5019df4ed57762755";
 const TRAINING_URL = "https://taiji.algo.qq.com/training";
 const DEFAULT_API_AUTH_WAIT_MS = 180_000;
+const DEFAULT_OUT_ROOT = "taiji-output";
 
 const METRIC_SAFE_NAME = /[^a-zA-Z0-9._-]+/g;
 
@@ -13,7 +14,7 @@ function parseArgs(argv) {
   const args = {
     url: DEFAULT_URL,
     all: false,
-    outDir: "taiji-output",
+    outDir: DEFAULT_OUT_ROOT,
     headless: false,
     timeoutMs: 120_000,
     pageSize: 100,
@@ -39,6 +40,12 @@ function parseArgs(argv) {
   args.authTimeoutMs ??= Math.max(args.timeoutMs, DEFAULT_API_AUTH_WAIT_MS);
 
   return args;
+}
+
+function resolveTaijiOutputDir(outDir) {
+  if (path.isAbsolute(outDir)) return outDir;
+  if (outDir.split(/[\\/]/)[0] === DEFAULT_OUT_ROOT) return path.resolve(outDir);
+  return path.resolve(DEFAULT_OUT_ROOT, outDir);
 }
 
 function extractCookieHeader(fileContent) {
@@ -681,8 +688,8 @@ async function scrapeAllTrainingJobs(page, args, outputDir) {
 
 async function main() {
   const args = parseArgs(process.argv.slice(2));
-  const outputDir = path.resolve(args.outDir);
-  const userDataDir = path.resolve(".taiji-browser-profile");
+  const outputDir = resolveTaijiOutputDir(args.outDir);
+  const userDataDir = path.resolve(outputDir, "browser-profile");
 
   await mkdir(outputDir, { recursive: true });
 

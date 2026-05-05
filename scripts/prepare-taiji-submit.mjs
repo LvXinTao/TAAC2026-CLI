@@ -5,6 +5,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
+const DEFAULT_OUT_ROOT = "taiji-output";
 
 function usage() {
   return `Usage:
@@ -13,7 +14,7 @@ function usage() {
 Options:
   --description <text>   Job Description to use on Taiji.
   --run                  Mark the prepared submission as run-after-submit.
-  --out <dir>            Output directory. Default: taiji-submit
+  --out <dir>            Output directory. Relative paths are placed under taiji-output/. Default: taiji-output/submit-bundle
   --message <text>       Optional local note, often matching the git commit message.
   --allow-dirty          Do not warn when the local git working tree is dirty.
   --help                 Show this help.
@@ -26,7 +27,7 @@ browser/API automation after the platform upload flow is captured.`;
 function parseArgs(argv) {
   const args = {
     run: false,
-    out: "taiji-submit",
+    out: "submit-bundle",
     allowDirty: false,
   };
 
@@ -104,6 +105,12 @@ function safeBasename(filePath) {
   return path.basename(path.normalize(filePath));
 }
 
+function resolveTaijiOutputDir(outDir) {
+  if (path.isAbsolute(outDir)) return outDir;
+  if (outDir.split(/[\\/]/)[0] === DEFAULT_OUT_ROOT) return path.resolve(outDir);
+  return path.resolve(DEFAULT_OUT_ROOT, outDir);
+}
+
 async function fileInfo(filePath) {
   const s = await stat(filePath);
   return {
@@ -162,7 +169,7 @@ async function main() {
 
   const codeZip = path.resolve(args.zip);
   const config = path.resolve(args.config);
-  const outDir = path.resolve(args.out);
+  const outDir = resolveTaijiOutputDir(args.out);
   const filesDir = path.join(outDir, "files");
 
   if (!(await exists(codeZip))) {

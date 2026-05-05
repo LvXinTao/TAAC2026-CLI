@@ -27,6 +27,7 @@ Higher-level wrappers can combine this with Git:
 git add .
 git commit -m "try focal loss"
 node scripts/prepare-taiji-submit.mjs --template-job-url "<url>" --zip ".\artifacts\exp.zip" --config ".\config.yaml" --name "exp_017" --description "try focal loss" --run
+node scripts/submit-taiji.mjs --bundle taiji-output/submit-bundle --cookie-file taiji-output/secrets/taiji-cookie.txt --template-job-internal-id 58620 --execute --yes --run
 ```
 
 ## Preferred Platform Flow
@@ -64,30 +65,34 @@ Existing scraper work identified these useful endpoints:
 - Likely create/update Job: `POST /taskmanagement/api/v1/webtasks/external/task`
 - Likely start Job: `POST /taskmanagement/api/v1/webtasks/{taskID}/start`
 
-The unresolved part is file upload: the platform may upload code/config to an
-object store first, then place returned file metadata into `trainFiles`.
+Captured live flow:
 
-## Before Enabling Live Submit
+1. `GET /aide/api/evaluation_tasks/get_federation_token/`
+2. COS `PUT` code zip to `hunyuan-external-1258344706` / `ap-guangzhou`
+3. `GET /aide/api/evaluation_tasks/get_federation_token/`
+4. COS `PUT` `config.yaml`
+5. `POST /taskmanagement/api/v1/webtasks/external/task` with updated `trainFiles`
+6. Optional `POST /taskmanagement/api/v1/webtasks/{taskID}/start`
+7. `POST /taskmanagement/api/v1/instances/list`
 
-Capture one successful manual flow in DevTools from the same browser context:
+## Live Submit Safety
 
-1. Filter Network to Fetch/XHR.
-2. Copy the requests for Copy Job, upload code zip, upload config, submit Job,
-   and Run.
-3. Save sanitized request URLs, methods, payload shapes, and response shapes.
-4. Do not commit cookies, tokens, or private code.
-5. Only then add a live `submit-taiji.mjs` implementation that replays the
-   stable API path or calibrated browser selectors.
+`scripts/submit-taiji.mjs` is dry-run by default. It only writes a plan under
+`taiji-output/submit-live/<timestamp>/`. Live mutation requires explicit
+`--execute --yes`; training start additionally requires `--run`.
+
+Do not commit cookies, token captures, prepared bundles, or live results. Keep
+them under `taiji-output/`.
 
 ## Safe Current Tool
 
 `scripts/prepare-taiji-submit.mjs` intentionally does not upload or click. It:
 
 - Validates the code zip and config file.
-- Copies both files into a deterministic `taiji-submit/files/` directory.
+- Copies both files into a deterministic `taiji-output/submit-bundle/files/` directory by default.
 - Records Job Name, Job Description, template URL, and `runAfterSubmit`.
 - Records Git root, branch, HEAD, and dirty status when available.
 - Writes `manifest.json` and `NEXT_STEPS.md`.
 
-This gives a local agent a consistent handoff point without risking accidental
-platform mutations.
+This gives a local agent a consistent handoff point. `submit-taiji.mjs` consumes
+that bundle when the user explicitly asks for live upload/run.

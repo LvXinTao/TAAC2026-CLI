@@ -6,9 +6,12 @@ import { test } from "node:test";
 
 import {
   compareJobs,
+  compareRuns,
   diagnoseJob,
   diffConfigRef,
   doctorBundle,
+  logsForJob,
+  selectCheckpoint,
   syncLedger,
   verifyBundleAgainstJob,
 } from "../experiment-tools.mjs";
@@ -55,6 +58,10 @@ async function makeTaijiOutput(tempRoot) {
   await writeFile(path.join(filesDir, "code.zip"), Buffer.from([0x50, 0x4b, 0x03, 0x04]));
   await writeFile(path.join(filesDir, "config.yaml"), "item_id_oov_threshold: 5\nitem_id_oov_buckets: 32\n");
   await writeFile(path.join(filesDir, "run.sh"), "#!/usr/bin/env bash\necho train\n");
+  const jobBCodeDir = path.join(outputDir, "code", "angel_job_b");
+  const jobBFilesDir = path.join(jobBCodeDir, "files");
+  await mkdir(jobBFilesDir, { recursive: true });
+  await writeFile(path.join(jobBFilesDir, "config.yaml"), "item_id_oov_threshold: 10\nitem_id_oov_buckets: 32\n");
   await writeFile(
     path.join(codeDir, "train-files.json"),
     JSON.stringify({
@@ -82,12 +89,23 @@ async function makeTaijiOutput(tempRoot) {
     path.join(outputDir, "all-metrics-long.csv"),
     [
       "jobId,jobInternalId,jobName,instanceId,metric,chart,chartIndex,series,step,value",
-      "angel_job_a,56242,v1,instance_a,AUC,valid,0,valid,1,0.86",
-      "angel_job_a,56242,v1,instance_a,AUC,valid,0,valid,2,0.865",
-      "angel_job_a,56242,v1,instance_a,AUC,valid_test_like,0,valid_test_like,2,0.864",
-      "angel_job_a,56242,v1,instance_a,LogLoss,valid,0,valid,2,0.27",
-      "angel_job_b,58244,v2,instance_b,AUC,valid,0,valid,1,0.861",
-      "angel_job_b,58244,v2,instance_b,AUC,valid_test_like,0,valid_test_like,1,0.866",
+      "angel_job_a,56242,v1,instance_a,AUC,AUC/valid,0,AUC/valid,1,0.86",
+      "angel_job_a,56242,v1,instance_a,AUC,AUC/valid,0,AUC/valid,2,0.865",
+      "angel_job_a,56242,v1,instance_a,AUC,AUC/valid_test_like,0,AUC/valid_test_like,2,0.864",
+      "angel_job_a,56242,v1,instance_a,LogLoss,LogLoss/valid,0,LogLoss/valid,2,0.27",
+      "angel_job_a,56242,v1,instance_a,Loss,Loss/train,0,Loss/train,3,0.25",
+      "angel_job_b,58244,v2,instance_b,AUC,AUC/valid,0,AUC/valid,1,0.861",
+      "angel_job_b,58244,v2,instance_b,AUC,AUC/valid_test_like,0,AUC/valid_test_like,1,0.866",
+      "",
+    ].join("\n"),
+  );
+  await writeFile(
+    path.join(outputDir, "all-checkpoints.csv"),
+    [
+      "jobId,jobInternalId,jobName,instanceId,ckpt,ckptFileSize,createTime,deleteTime,status",
+      "angel_job_a,56242,v1,instance_a,global_step1.epoch=1.AUC=0.860000.Logloss=0.280000.best_model,100,2026-05-05T01:10:00+08:00,,false",
+      "angel_job_a,56242,v1,instance_a,global_step2.epoch=2.AUC=0.865000.Logloss=0.270000.best_model,100,2026-05-05T01:20:00+08:00,,true",
+      "angel_job_b,58244,v2,instance_b,global_step1.epoch=1.AUC=0.861000.Logloss=0.275000.best_model,100,2026-05-05T02:10:00+08:00,,true",
       "",
     ].join("\n"),
   );
@@ -165,4 +183,55 @@ test("diagnose job extracts errors and resolved config from logs", async () => {
   assert.equal(report.job.jobInternalId, "56242");
   assert.equal(report.errors.length, 2);
   assert.equal(report.resolvedConfigs.length, 1);
+});
+
+test("compare-runs combines config and metric evidence without selecting a winner", async () => {
+  const tempRoot = await mkdtemp(path.join(os.tmpdir(), "taac2026-compare-runs-"));
+  const { outputDir } = await makeTaijiOutput(tempRoot);
+
+  const report = await compareRuns({ outputDir, baseJobInternalId: "58244", expJobInternalId: "56242" });
+
+  assert.equal(report.decision, "not_provided");
+  assert.equal(report.base.jobInternalId, "58244");
+  assert.equal(report.exp.jobInternalId, "56242");
+  assert.deepEqual(report.config.changed.map((item) => item.path), ["item_id_oov_threshold"]);
+  assert.equal(report.metrics["AUC/valid"].bestDelta, 0.0040000000000000036);
+  assert.equal(report.direction.validAndTestLikeSameDirection, false);
+  assert.equal(report.candidates.byValidAuc.step, 2);
+});
+
+test("logs command extracts errors and configurable tail lines", async () => {
+  const tempRoot = await mkdtemp(path.join(os.tmpdir(), "taac2026-logs-"));
+  const { outputDir } = await makeTaijiOutput(tempRoot);
+
+  const report = await logsForJob({ outputDir, jobInternalId: "56242", errorsOnly: true, tail: 2 });
+
+  assert.equal(report.job.jobInternalId, "56242");
+  assert.equal(report.errors.length, 2);
+  assert.equal(report.tail[0].lines.length, 2);
+});
+
+test("ckpt-select returns a checkpoint candidate by explicit rule", async () => {
+  const tempRoot = await mkdtemp(path.join(os.tmpdir(), "taac2026-ckpt-select-"));
+  const { outputDir } = await makeTaijiOutput(tempRoot);
+
+  const report = await selectCheckpoint({ outputDir, jobInternalId: "56242", by: "valid_auc" });
+
+  assert.equal(report.decision, "not_provided");
+  assert.equal(report.selectedByRule.rule, "valid_auc");
+  assert.equal(report.selectedByRule.step, 2);
+  assert.equal(report.selectedByRule.epoch, 2);
+  assert.match(report.selectedByRule.ckpt, /global_step2/);
+  assert.equal(report.selectedByRule.metrics["AUC/valid"], 0.865);
+});
+
+test("ckpt-select pareto ignores train-only steps", async () => {
+  const tempRoot = await mkdtemp(path.join(os.tmpdir(), "taac2026-ckpt-pareto-"));
+  const { outputDir } = await makeTaijiOutput(tempRoot);
+
+  const report = await selectCheckpoint({ outputDir, jobInternalId: "56242", by: "pareto" });
+
+  assert(report.candidates.length > 0);
+  assert(!report.candidates.some((candidate) => candidate.step === 3));
+  assert(report.candidates.every((candidate) => Number.isFinite(candidate.metrics["AUC/valid"])));
 });

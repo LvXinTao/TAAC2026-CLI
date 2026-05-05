@@ -60,9 +60,12 @@ Daily experiment evidence tools:
 taac2026 submit doctor --bundle taiji-output/submit-bundle
 taac2026 submit verify --bundle taiji-output/submit-bundle --job-internal-id <JOB_INTERNAL_ID>
 taac2026 compare jobs <JOB_INTERNAL_ID...> --json
+taac2026 compare-runs --base <BASE_JOB_INTERNAL_ID> --exp <EXP_JOB_INTERNAL_ID> --config --metrics --json
 taac2026 config diff-ref --config config.yaml --job-internal-id <JOB_INTERNAL_ID> --json
 taac2026 ledger sync
+taac2026 logs --job <JOB_INTERNAL_ID> --errors --tail 100 --json
 taac2026 diagnose job --job-internal-id <JOB_INTERNAL_ID> --json
+taac2026 ckpt-select --job <JOB_INTERNAL_ID> --by valid_auc --json
 ```
 
 Use these commands to collect evidence and catch mistakes; do not present them as automatic experiment decision makers.
@@ -171,11 +174,13 @@ Use `submit doctor` before live submit to check bundle file hashes, zip/config/r
 
 Use `submit verify` after scraping the submitted Job to compare platform-side trainFiles and log `Resolved config` against the local bundle. If hashes mismatch, treat the Job as suspect until the upload path is explained.
 
-Use `compare jobs` to gather metric evidence across explicit Jobs. It reports summaries and manually recorded test scores from Job text, but its `decision` field remains `not_provided`.
+Use `compare jobs` to gather metric evidence across explicit Jobs. Use `compare-runs` for a base-vs-exp view with config diff, metric deltas, direction checks, and explicit-rule checkpoint candidates. These reports keep `decision: not_provided`.
 
 Use `config diff-ref` only against an explicit reference Job. Do not infer "highest score" or "best config" unless the user supplies that policy.
 
-Use `ledger sync` to persist structured experiment history under `taiji-output/ledger/experiments.json`, and `diagnose job` to collect errors, log tails, and resolved configs for debugging.
+Use `ledger sync` to persist structured experiment history under `taiji-output/ledger/experiments.json`, `logs --errors` for quick error/tail extraction, and `diagnose job` to collect errors, log tails, and resolved configs for debugging.
+
+Use `ckpt-select` only with an explicit rule such as `--by valid_auc`, `--by valid_test_like_auc`, `--by logloss`, or `--by pareto`. Present the result as a candidate selected by that rule, not as a final recommendation.
 
 ## Implementation Notes
 

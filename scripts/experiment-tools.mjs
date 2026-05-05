@@ -14,6 +14,9 @@ function usage() {
   taac2026 submit doctor --bundle <submit-bundle-dir> [--json] [--out <file>]
   taac2026 submit verify --bundle <submit-bundle-dir> --job-internal-id <id> [--output-dir taiji-output]
   taac2026 compare jobs <job-internal-id...> [--output-dir taiji-output] [--json]
+  taac2026 compare-runs --base <id> --exp <id> [--config] [--metrics] [--json]
+  taac2026 logs --job <id> --errors [--tail 100] [--json]
+  taac2026 ckpt-select --job <id> --by valid_auc [--json]
   taac2026 config diff-ref --config <config.yaml> --job-internal-id <id> [--output-dir taiji-output]
   taac2026 ledger sync [--output-dir taiji-output] [--out <file>]
   taac2026 diagnose job --job-internal-id <id> [--output-dir taiji-output] [--json]`;
@@ -22,12 +25,17 @@ function usage() {
 function parseArgs(argv) {
   const positional = [];
   const args = { positional };
+  const booleanFlags = new Set(["json", "errors", "config", "metrics"]);
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
     if (arg === "--help" || arg === "-h") args.help = true;
     else if (arg === "--json") args.json = true;
     else if (arg.startsWith("--")) {
       const key = arg.slice(2).replace(/-([a-z])/g, (_, c) => c.toUpperCase());
+      if (booleanFlags.has(key)) {
+        args[key] = true;
+        continue;
+      }
       const value = argv[i + 1];
       if (!value || value.startsWith("--")) throw new Error(`Missing value for ${arg}`);
       args[key] = value;
@@ -128,6 +136,14 @@ async function loadJobRows(outputDir) {
   return readCsv(path.join(outputDir, "jobs-summary.csv"));
 }
 
+async function loadMetricRows(outputDir) {
+  return readCsv(path.join(outputDir, "all-metrics-long.csv"));
+}
+
+async function loadCheckpointRows(outputDir) {
+  return readCsv(path.join(outputDir, "all-checkpoints.csv"));
+}
+
 function matchJob(row, options) {
   if (options.jobInternalId && String(row.jobInternalId) === String(options.jobInternalId)) return true;
   if (options.jobId && String(row.jobId) === String(options.jobId)) return true;
@@ -212,8 +228,21 @@ function diffObjects(left, right, options = {}) {
   return { added, removed, changed };
 }
 
+function normalizeMetricText(value) {
+  const text = String(value ?? "").trim();
+  if (!text) return "";
+  return text.replace(/^Logloss\b/i, "LogLoss").replace(/\/Logloss\b/i, "/LogLoss");
+}
+
 function metricKey(row) {
-  return [row.metric, row.chart || row.series].filter(Boolean).join("/");
+  const metric = normalizeMetricText(row.metric);
+  const chart = normalizeMetricText(row.chart);
+  const series = normalizeMetricText(row.series);
+  const fullKey = [series, chart, metric].find((value) => value.includes("/"));
+  if (fullKey) return fullKey;
+  if (metric && chart && chart !== metric) return `${metric}/${chart}`;
+  if (metric && series && series !== metric) return `${metric}/${series}`;
+  return metric || chart || series;
 }
 
 function summarizeMetricRows(rows) {
@@ -243,6 +272,129 @@ function summarizeMetricRows(rows) {
     };
   }
   return summary;
+}
+
+function metricRowsForJob(rows, jobInternalId) {
+  return rows.filter((row) => String(row.jobInternalId) === String(jobInternalId));
+}
+
+function metricsAtStep(rows, step) {
+  const result = {};
+  for (const row of rows) {
+    if (Number(row.step) === Number(step)) {
+      const value = Number(row.value);
+      if (Number.isFinite(value)) result[metricKey(row)] = value;
+    }
+  }
+  return result;
+}
+
+function parseCheckpointName(ckpt) {
+  const text = String(ckpt ?? "");
+  const step = text.match(/global_step(\d+)/i);
+  const epoch = text.match(/epoch=(\d+)/i);
+  const auc = text.match(/AUC=([0-9.]+)/i);
+  const logloss = text.match(/Logloss=([0-9.]+)/i);
+  return {
+    step: step ? Number(step[1]) : null,
+    epoch: epoch ? Number(epoch[1]) : null,
+    auc: auc ? Number(auc[1]) : null,
+    logloss: logloss ? Number(logloss[1]) : null,
+  };
+}
+
+function checkpointRowsForJob(rows, jobInternalId) {
+  return rows
+    .filter((row) => String(row.jobInternalId) === String(jobInternalId))
+    .map((row) => ({ ...row, parsed: parseCheckpointName(row.ckpt) }));
+}
+
+function checkpointForStep(checkpoints, step) {
+  return checkpoints.find((row) => Number(row.parsed.step) === Number(step)) ?? null;
+}
+
+function ruleSpec(rule) {
+  const normalized = String(rule ?? "valid_auc").toLowerCase().replaceAll("-", "_");
+  if (normalized === "valid_auc") return { rule: normalized, metric: "AUC/valid", mode: "max" };
+  if (normalized === "valid_test_like_auc" || normalized === "test_like_auc") {
+    return { rule: normalized, metric: "AUC/valid_test_like", mode: "max" };
+  }
+  if (normalized === "valid_logloss" || normalized === "logloss") return { rule: normalized, metric: "LogLoss/valid", mode: "min" };
+  if (normalized === "pareto") return { rule: normalized, metric: null, mode: "pareto" };
+  throw new Error(`Unsupported checkpoint rule: ${rule}`);
+}
+
+function candidateFromPoint(point, rows, checkpoints, spec) {
+  const ckpt = checkpointForStep(checkpoints, point.step);
+  return {
+    rule: spec.rule,
+    step: point.step,
+    epoch: ckpt?.parsed.epoch ?? null,
+    ckpt: ckpt?.ckpt ?? null,
+    checkpoint: ckpt
+      ? {
+          ckpt: ckpt.ckpt,
+          status: ckpt.status,
+          createTime: ckpt.createTime,
+          deleteTime: ckpt.deleteTime,
+          ckptFileSize: ckpt.ckptFileSize,
+        }
+      : null,
+    metrics: metricsAtStep(rows, point.step),
+  };
+}
+
+function selectCandidateBySpec(rows, checkpoints, spec, jobInternalId) {
+  const point = selectPointByMetric(rows, spec.metric, spec.mode);
+  if (!point) throw new Error(`No metric rows found for ${spec.metric} on job ${jobInternalId}`);
+  return candidateFromPoint(point, rows, checkpoints, spec);
+}
+
+function selectCandidateOrNull(rows, checkpoints, spec, jobInternalId) {
+  try {
+    return selectCandidateBySpec(rows, checkpoints, spec, jobInternalId);
+  } catch {
+    return null;
+  }
+}
+
+function selectPointByMetric(rows, metric, mode) {
+  const points = rows
+    .filter((row) => metricKey(row) === metric)
+    .map((row) => ({ step: Number(row.step), value: Number(row.value) }))
+    .filter((point) => Number.isFinite(point.step) && Number.isFinite(point.value));
+  if (!points.length) return null;
+  return points.reduce((best, point) => {
+    if (mode === "min") return point.value < best.value ? point : best;
+    return point.value > best.value ? point : best;
+  }, points[0]);
+}
+
+function paretoCandidates(rows, checkpoints) {
+  const steps = [...new Set(rows.map((row) => Number(row.step)).filter(Number.isFinite))].sort((a, b) => a - b);
+  const candidates = steps.map((step) => {
+    const metrics = metricsAtStep(rows, step);
+    return {
+      rule: "pareto",
+      step,
+      epoch: checkpointForStep(checkpoints, step)?.parsed.epoch ?? null,
+      ckpt: checkpointForStep(checkpoints, step)?.ckpt ?? null,
+      metrics,
+    };
+  }).filter((candidate) => Number.isFinite(candidate.metrics["AUC/valid"]));
+  return candidates.filter((candidate) => {
+    return !candidates.some((other) => {
+      if (other === candidate) return false;
+      const auc = other.metrics["AUC/valid"] >= candidate.metrics["AUC/valid"];
+      const like = (other.metrics["AUC/valid_test_like"] ?? -Infinity) >= (candidate.metrics["AUC/valid_test_like"] ?? -Infinity);
+      const loss = (other.metrics["LogLoss/valid"] ?? Infinity) <= (candidate.metrics["LogLoss/valid"] ?? Infinity);
+      const strictlyBetter =
+        other.metrics["AUC/valid"] > candidate.metrics["AUC/valid"] ||
+        (other.metrics["AUC/valid_test_like"] ?? -Infinity) > (candidate.metrics["AUC/valid_test_like"] ?? -Infinity) ||
+        (other.metrics["LogLoss/valid"] ?? Infinity) < (candidate.metrics["LogLoss/valid"] ?? Infinity);
+      return auc && like && loss && strictlyBetter;
+    });
+  });
 }
 
 function addFinding(findings, level, code, message, detail = {}) {
@@ -404,7 +556,7 @@ export async function verifyBundleAgainstJob(options) {
 export async function compareJobs(options) {
   const outputDir = path.resolve(options.outputDir ?? DEFAULT_OUT_ROOT);
   const jobs = await loadJobRows(outputDir);
-  const metrics = await readCsv(path.join(outputDir, "all-metrics-long.csv"));
+  const metrics = await loadMetricRows(outputDir);
   const wanted = new Set((options.jobInternalIds ?? []).map(String));
   const selected = jobs.filter((job) => !wanted.size || wanted.has(String(job.jobInternalId)));
 
@@ -412,7 +564,7 @@ export async function compareJobs(options) {
     outputDir,
     decision: "not_provided",
     jobs: selected.map((job) => {
-      const rows = metrics.filter((row) => String(row.jobInternalId) === String(job.jobInternalId));
+      const rows = metricRowsForJob(metrics, job.jobInternalId);
       return {
         jobId: job.jobId,
         jobInternalId: job.jobInternalId,
@@ -424,6 +576,86 @@ export async function compareJobs(options) {
         metrics: summarizeMetricRows(rows),
       };
     }),
+  };
+}
+
+export async function selectCheckpoint(options) {
+  const outputDir = path.resolve(options.outputDir ?? DEFAULT_OUT_ROOT);
+  const job = await resolveJob(outputDir, options);
+  const spec = ruleSpec(options.by);
+  const rows = metricRowsForJob(await loadMetricRows(outputDir), job.jobInternalId);
+  const checkpoints = checkpointRowsForJob(await loadCheckpointRows(outputDir), job.jobInternalId);
+
+  if (spec.mode === "pareto") {
+    return {
+      job,
+      decision: "not_provided",
+      selectedByRule: null,
+      candidates: paretoCandidates(rows, checkpoints),
+    };
+  }
+
+  return {
+    job,
+    decision: "not_provided",
+    selectedByRule: selectCandidateBySpec(rows, checkpoints, spec, job.jobInternalId),
+  };
+}
+
+export async function compareRuns(options) {
+  const outputDir = path.resolve(options.outputDir ?? DEFAULT_OUT_ROOT);
+  const base = await resolveJob(outputDir, { jobInternalId: required(options.baseJobInternalId, "Missing baseJobInternalId") });
+  const exp = await resolveJob(outputDir, { jobInternalId: required(options.expJobInternalId, "Missing expJobInternalId") });
+  const metrics = await loadMetricRows(outputDir);
+  const baseRows = metricRowsForJob(metrics, base.jobInternalId);
+  const expRows = metricRowsForJob(metrics, exp.jobInternalId);
+  const checkpoints = await loadCheckpointRows(outputDir);
+  const expCheckpoints = checkpointRowsForJob(checkpoints, exp.jobInternalId);
+  const baseSummary = summarizeMetricRows(baseRows);
+  const expSummary = summarizeMetricRows(expRows);
+  const metricDeltas = {};
+
+  for (const key of Object.keys(baseSummary).filter((key) => expSummary[key])) {
+    metricDeltas[key] = {
+      baseBestValue: baseSummary[key].bestValue,
+      expBestValue: expSummary[key].bestValue,
+      bestDelta: expSummary[key].bestValue - baseSummary[key].bestValue,
+      baseLastValue: baseSummary[key].lastValue,
+      expLastValue: expSummary[key].lastValue,
+      lastDelta: expSummary[key].lastValue - baseSummary[key].lastValue,
+    };
+  }
+
+  const validDelta = metricDeltas["AUC/valid"]?.bestDelta ?? null;
+  const testLikeDelta = metricDeltas["AUC/valid_test_like"]?.bestDelta ?? null;
+
+  return {
+    outputDir,
+    decision: "not_provided",
+    base: {
+      jobId: base.jobId,
+      jobInternalId: base.jobInternalId,
+      name: base.name,
+      metrics: baseSummary,
+      explicitTestScore: explicitTestScore(`${base.name} ${base.description}`),
+    },
+    exp: {
+      jobId: exp.jobId,
+      jobInternalId: exp.jobInternalId,
+      name: exp.name,
+      metrics: expSummary,
+      explicitTestScore: explicitTestScore(`${exp.name} ${exp.description}`),
+    },
+    config: diffObjects(await jobConfig(outputDir, base), await jobConfig(outputDir, exp)),
+    metrics: metricDeltas,
+    direction: {
+      validAndTestLikeSameDirection:
+        validDelta == null || testLikeDelta == null ? null : Math.sign(validDelta) === Math.sign(testLikeDelta),
+    },
+    candidates: {
+      byValidAuc: selectCandidateOrNull(expRows, expCheckpoints, ruleSpec("valid_auc"), exp.jobInternalId),
+      byValidTestLikeAuc: selectCandidateOrNull(expRows, expCheckpoints, ruleSpec("valid_test_like_auc"), exp.jobInternalId),
+    },
   };
 }
 
@@ -484,6 +716,29 @@ export async function diagnoseJob(options) {
   };
 }
 
+export async function logsForJob(options) {
+  const outputDir = path.resolve(options.outputDir ?? DEFAULT_OUT_ROOT);
+  const job = await resolveJob(outputDir, options);
+  const tailCount = Number(options.tail ?? 100);
+  const errors = [];
+  const tail = [];
+  for (const filePath of await logFilesForJob(outputDir, job.jobId)) {
+    const lines = (await readFile(filePath, "utf8")).split(/\r?\n/).filter(Boolean);
+    lines.forEach((line, index) => {
+      if (/traceback|error|exception|oom|out of memory|filenotfound|no such file|valueerror|runtimeerror/i.test(line)) {
+        errors.push({ file: filePath, line: index + 1, text: line });
+      }
+    });
+    tail.push({ file: filePath, lines: lines.slice(-tailCount) });
+  }
+  return {
+    job,
+    errorsOnly: Boolean(options.errorsOnly),
+    errors,
+    tail,
+  };
+}
+
 function formatReport(report) {
   const lines = [`status: ${report.summary?.status ?? "unknown"}`];
   for (const finding of report.findings ?? []) lines.push(`- ${finding.level}: ${finding.code}: ${finding.message}`);
@@ -527,6 +782,33 @@ async function main() {
       outputDir: args.outputDir,
       jobInternalIds: args.positional.slice(2),
     }), { ...args, json: args.json ?? true }, "compare-jobs.json");
+    return;
+  }
+  if ((domain === "compare" && action === "runs") || domain === "compare-runs") {
+    await writeResult(await compareRuns({
+      outputDir: args.outputDir,
+      baseJobInternalId: args.base,
+      expJobInternalId: args.exp,
+    }), { ...args, json: args.json ?? true }, "compare-runs.json");
+    return;
+  }
+  if (domain === "logs") {
+    await writeResult(await logsForJob({
+      outputDir: args.outputDir,
+      jobInternalId: args.jobInternalId ?? args.job,
+      jobId: args.jobId,
+      errorsOnly: args.errors,
+      tail: args.tail,
+    }), { ...args, json: args.json ?? true }, "logs.json");
+    return;
+  }
+  if (domain === "ckpt-select") {
+    await writeResult(await selectCheckpoint({
+      outputDir: args.outputDir,
+      jobInternalId: args.jobInternalId ?? args.job,
+      jobId: args.jobId,
+      by: args.by,
+    }), { ...args, json: args.json ?? true }, "ckpt-select.json");
     return;
   }
   if (domain === "config" && action === "diff-ref") {

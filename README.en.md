@@ -85,7 +85,7 @@ Most importantly, metrics should be compared by an agent across runs, not by hum
 | Prepare submit bundle | `taiji-output/submit-bundle/` |
 | Dry-run / live submit | `taiji-output/submit-live/<timestamp>/` |
 | Submit safety / read-back verification | `submit doctor`, `submit verify` |
-| Experiment evidence tools | `compare jobs`, `config diff-ref`, `ledger sync`, `diagnose job` |
+| Experiment evidence tools | `compare jobs`, `compare-runs`, `config diff-ref`, `ledger sync`, `logs`, `diagnose job`, `ckpt-select` |
 
 ## Quick Start
 
@@ -151,6 +151,12 @@ Compare multiple Jobs as an evidence table with metrics, manually recorded test 
 taac2026 compare jobs 56242 58244 --json
 ```
 
+Compare one base Job against one experiment Job with config diff, best/final metric deltas, direction checks, and checkpoint candidates by explicit rule:
+
+```bash
+taac2026 compare-runs --base 58244 --exp 56242 --config --metrics --json
+```
+
 Compare a local config against one explicit Job reference, without assuming any "best score" policy:
 
 ```bash
@@ -162,6 +168,13 @@ Sync a structured experiment ledger, or extract diagnosis evidence from a failed
 ```bash
 taac2026 ledger sync
 taac2026 diagnose job --job-internal-id 56242 --json
+```
+
+Extract error logs quickly, or list checkpoint candidates by an explicit metric rule:
+
+```bash
+taac2026 logs --job 60414 --errors --tail 100 --json
+taac2026 ckpt-select --job 56242 --by valid_auc --json
 ```
 
 ## Submit Training

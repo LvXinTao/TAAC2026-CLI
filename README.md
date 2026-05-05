@@ -85,7 +85,7 @@ taac2026 --help
 | 准备提交包 | `taiji-output/submit-bundle/` |
 | dry-run / live submit | `taiji-output/submit-live/<timestamp>/` |
 | 实验安全检查 / 回读校验 | `submit doctor`、`submit verify` |
-| 实验证据整理 | `compare jobs`、`config diff-ref`、`ledger sync`、`diagnose job` |
+| 实验证据整理 | `compare jobs`、`compare-runs`、`config diff-ref`、`ledger sync`、`logs`、`diagnose job`、`ckpt-select` |
 
 ## 快速开始
 
@@ -151,6 +151,12 @@ taac2026 submit verify --bundle taiji-output/submit-bundle --job-internal-id 562
 taac2026 compare jobs 56242 58244 --json
 ```
 
+对比一个 base 和一个实验 Job，合并 config diff、best/final 指标差异、同向性和候选 checkpoint 规则结果：
+
+```bash
+taac2026 compare-runs --base 58244 --exp 56242 --config --metrics --json
+```
+
 比较当前配置和某个明确 Job 的平台配置，不做“最高分对齐”假设：
 
 ```bash
@@ -162,6 +168,13 @@ taac2026 config diff-ref --config config.yaml --job-internal-id 56242 --json
 ```bash
 taac2026 ledger sync
 taac2026 diagnose job --job-internal-id 56242 --json
+```
+
+快速抽取错误日志，或按明确指标规则列出 checkpoint 候选：
+
+```bash
+taac2026 logs --job 60414 --errors --tail 100 --json
+taac2026 ckpt-select --job 56242 --by valid_auc --json
 ```
 
 ## 自动提交训练

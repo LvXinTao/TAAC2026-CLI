@@ -26,6 +26,18 @@ const commands = {
     script: "scripts/experiment-tools.mjs",
     description: "Compare Jobs as evidence bundles without making experiment decisions.",
   },
+  "compare-runs": {
+    script: "scripts/experiment-tools.mjs",
+    description: "Compare one base Job and one experiment Job.",
+  },
+  logs: {
+    script: "scripts/experiment-tools.mjs",
+    description: "Extract errors and tail lines from scraped Taiji Job logs.",
+  },
+  "ckpt-select": {
+    script: "scripts/experiment-tools.mjs",
+    description: "Select checkpoint candidates by explicit metric rules.",
+  },
   config: {
     script: "scripts/experiment-tools.mjs",
     description: "Compare config.yaml against an explicit Job reference.",
@@ -58,6 +70,8 @@ Examples:
   taac2026 submit --bundle taiji-output/submit-bundle --template-job-internal-id <id>
   taac2026 submit doctor --bundle taiji-output/submit-bundle
   taac2026 compare jobs 56242 58244
+  taac2026 compare-runs --base 58244 --exp 56242
+  taac2026 ckpt-select --job 56242 --by valid_auc
 
 Run 'taac2026 <command> --help' for command-specific options.`;
 }
@@ -80,7 +94,7 @@ function run() {
   const routedArgs =
     commandName === "submit" && submitHelperActions.has(args[0])
       ? ["submit", ...args]
-      : ["compare", "config", "ledger", "diagnose"].includes(commandName)
+      : ["compare", "compare-runs", "logs", "ckpt-select", "config", "ledger", "diagnose"].includes(commandName)
         ? [commandName, ...args]
         : args;
 

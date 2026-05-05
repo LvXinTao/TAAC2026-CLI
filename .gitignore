@@ -1,0 +1,7 @@
+node_modules/
+package-lock.json
+taiji-cookie.txt
+taiji-output/
+.taiji-browser-profile/
+.taiji-debug-profile/
+*.log

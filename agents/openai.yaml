@@ -1,0 +1,4 @@
+interface:
+  display_name: "TAAC Metrics Scraper"
+  short_description: "Scrape TAAC training jobs, instances, checkpoints, and metrics."
+  default_prompt: "Scrape TAAC training metrics from taiji.algo.qq.com using browser cookies and export JSON/CSV outputs."

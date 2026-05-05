@@ -1,0 +1,16 @@
+{
+  "name": "taiji-metrics-scraper-skill",
+  "version": "0.1.0",
+  "private": false,
+  "type": "module",
+  "scripts": {
+    "scrape": "node scripts/scrape-taiji.mjs",
+    "scrape:all": "node scripts/scrape-taiji.mjs --all",
+    "diff:config": "node scripts/compare-config-yaml.mjs",
+    "check": "node --check scripts/scrape-taiji.mjs && node --check scripts/compare-config-yaml.mjs"
+  },
+  "dependencies": {
+    "js-yaml": "^4.1.0",
+    "playwright": "^1.52.0"
+  }
+}

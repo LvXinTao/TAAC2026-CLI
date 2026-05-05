@@ -20,9 +20,27 @@ const commands = {
   },
   submit: {
     script: "scripts/submit-taiji.mjs",
-    description: "Dry-run or explicitly execute Taiji upload/create/run.",
+    description: "Dry-run or execute upload/create/run; also supports doctor and verify helpers.",
+  },
+  compare: {
+    script: "scripts/experiment-tools.mjs",
+    description: "Compare Jobs as evidence bundles without making experiment decisions.",
+  },
+  config: {
+    script: "scripts/experiment-tools.mjs",
+    description: "Compare config.yaml against an explicit Job reference.",
+  },
+  ledger: {
+    script: "scripts/experiment-tools.mjs",
+    description: "Sync a structured experiment ledger from scraped Taiji outputs.",
+  },
+  diagnose: {
+    script: "scripts/experiment-tools.mjs",
+    description: "Extract failure evidence from a scraped Taiji Job.",
   },
 };
+
+const submitHelperActions = new Set(["doctor", "verify"]);
 
 function usage() {
   return `TAAC2026 CLI
@@ -38,6 +56,8 @@ Examples:
   taac2026 diff-config old.yaml new.yaml --json --out diff.json
   taac2026 prepare-submit --template-job-url <url> --file-dir ./taiji-files --name exp_001
   taac2026 submit --bundle taiji-output/submit-bundle --template-job-internal-id <id>
+  taac2026 submit doctor --bundle taiji-output/submit-bundle
+  taac2026 compare jobs 56242 58244
 
 Run 'taac2026 <command> --help' for command-specific options.`;
 }
@@ -57,7 +77,19 @@ function run() {
     return;
   }
 
-  const child = spawn(process.execPath, [path.join(rootDir, command.script), ...args], {
+  const routedArgs =
+    commandName === "submit" && submitHelperActions.has(args[0])
+      ? ["submit", ...args]
+      : ["compare", "config", "ledger", "diagnose"].includes(commandName)
+        ? [commandName, ...args]
+        : args;
+
+  const routedScript =
+    commandName === "submit" && submitHelperActions.has(args[0])
+      ? "scripts/experiment-tools.mjs"
+      : command.script;
+
+  const child = spawn(process.execPath, [path.join(rootDir, routedScript), ...routedArgs], {
     stdio: "inherit",
   });
 

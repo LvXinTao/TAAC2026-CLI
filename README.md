@@ -84,6 +84,8 @@ taac2026 --help
 | 比较 config | `taiji-output/config-diffs/*.json` 或 Markdown |
 | 准备提交包 | `taiji-output/submit-bundle/` |
 | dry-run / live submit | `taiji-output/submit-live/<timestamp>/` |
+| 实验安全检查 / 回读校验 | `submit doctor`、`submit verify` |
+| 实验证据整理 | `compare jobs`、`config diff-ref`、`ledger sync`、`diagnose job` |
 
 ## 快速开始
 
@@ -125,6 +127,42 @@ taac2026 diff-config old-config.yaml new-config.yaml --json --out diff.json
 ```
 
 `--out diff.json` 会写到 `taiji-output/config-diffs/diff.json`，不会掉到根目录。
+
+## 日常实验工具
+
+这些工具只整理证据和拦截低级错误，不替你决定哪个实验更值得提交。
+
+提交前检查 bundle：
+
+```bash
+taac2026 submit doctor --bundle taiji-output/submit-bundle
+```
+
+提交后回读平台文件，确认平台实际 `code.zip/config.yaml/run.sh` 和本地 bundle 一致：
+
+```bash
+taac2026 scrape --all --job-internal-id 56242 --cookie-file taiji-output/secrets/taiji-cookie.txt --direct
+taac2026 submit verify --bundle taiji-output/submit-bundle --job-internal-id 56242
+```
+
+跨实验整理指标、描述里的人工 test 分、valid/test-like 曲线证据：
+
+```bash
+taac2026 compare jobs 56242 58244 --json
+```
+
+比较当前配置和某个明确 Job 的平台配置，不做“最高分对齐”假设：
+
+```bash
+taac2026 config diff-ref --config config.yaml --job-internal-id 56242 --json
+```
+
+同步结构化实验账本，或诊断失败 Job：
+
+```bash
+taac2026 ledger sync
+taac2026 diagnose job --job-internal-id 56242 --json
+```
 
 ## 自动提交训练
 
@@ -299,7 +337,7 @@ taiji-output/
 - 想比较两个实验版本的 `config.yaml`。
 - 想把每个 Job 的代码、日志、checkpoint 和指标归档起来。
 - 想用一个已成功的模板 Job 自动提交下一组代码和配置。
-- 想让 agent 根据历史实验记录辅助判断下一次训练是否值得跑。
+- 想让 agent 先整理历史实验的证据，再由人和 agent 共同判断下一步策略。
 
 不适合这些场景：
 
@@ -316,6 +354,7 @@ taiji-output/
 | `scripts/compare-config-yaml.mjs` | 语义比较两个 YAML 配置 |
 | `scripts/prepare-taiji-submit.mjs` | 准备本地提交包，记录 Git 状态和上传文件 |
 | `scripts/submit-taiji.mjs` | dry-run 或显式执行 Taiji 上传、创建、Run 流程 |
+| `scripts/experiment-tools.mjs` | 提交前检查、提交后回读校验、实验对比、账本同步和日志诊断 |
 
 ## 故障判断
 

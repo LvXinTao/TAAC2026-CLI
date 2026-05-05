@@ -19,6 +19,28 @@ export const DOWNLOAD_VALIDATION_VERSION = 2;
 
 const METRIC_SAFE_NAME = /[^a-zA-Z0-9._-]+/g;
 
+function usage() {
+  return `Usage:
+  taac2026 scrape --all [options]
+  taac2026 scrape --url <ckpt-url> [options]
+  node scripts/scrape-taiji.mjs --all [options]
+
+Options:
+  --all                              Scrape the training Job list plus details, metrics, logs, checkpoints, and code files.
+  --url <ckpt-url>                   Scrape one ckpt page. A positional URL is also accepted.
+  --cookie-file <file>               Cookie header or Copy-as-cURL text.
+  --direct                           Use backend HTTP requests with the cookie file instead of Chromium.
+  --headless                         Launch Chromium in headless mode when not using --direct.
+  --incremental                      Skip deep fetches for unchanged terminal Jobs with complete validated cache.
+  --job-internal-id <id>             Target one Taiji internal Job id from the training list.
+  --job-id <task-id>                 Target one platform task id from the training list.
+  --out <dir>                        Output directory. Relative paths are placed under taiji-output/.
+  --page-size <n>                    Job/instance page size. Default: 100.
+  --timeout <ms>                     Browser/login timeout. Default: 120000.
+  --auth-timeout <ms>                API auth retry timeout. Default: max(timeout, 180000).
+  --help                            Show this help.`;
+}
+
 function parseArgs(argv) {
   const args = {
     url: DEFAULT_URL,
@@ -32,7 +54,8 @@ function parseArgs(argv) {
 
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
-    if (arg === "--url" && argv[i + 1]) args.url = argv[++i];
+    if (arg === "--help" || arg === "-h") args.help = true;
+    else if (arg === "--url" && argv[i + 1]) args.url = argv[++i];
     else if (arg === "--all") {
       args.all = true;
       args.url = TRAINING_URL;
@@ -905,6 +928,10 @@ async function scrapeAllTrainingJobs(page, args, outputDir) {
 
 async function main() {
   const args = parseArgs(process.argv.slice(2));
+  if (args.help) {
+    console.log(usage());
+    return;
+  }
   const outputDir = resolveTaijiOutputDir(args.outDir);
   const userDataDir = path.resolve(outputDir, "browser-profile");
 

@@ -16,6 +16,8 @@ test("taac2026 CLI prints top-level command help", async () => {
   assert.match(stdout, /diff-config/);
   assert.match(stdout, /prepare-submit/);
   assert.match(stdout, /submit/);
+  assert.match(stdout, /compare/);
+  assert.match(stdout, /ledger/);
 });
 
 test("taac2026 CLI dispatches to bundled commands", async () => {
@@ -23,4 +25,20 @@ test("taac2026 CLI dispatches to bundled commands", async () => {
 
   assert.match(stdout, /prepare-taiji-submit/);
   assert.match(stdout, /--file-dir/);
+});
+
+test("taac2026 scrape help does not launch a browser", async () => {
+  const { stdout } = await execFileAsync(process.execPath, [cliPath, "scrape", "--help"], { cwd: toolDir });
+
+  assert.match(stdout, /taac2026 scrape/);
+  assert.match(stdout, /--direct/);
+  assert.match(stdout, /--job-internal-id/);
+});
+
+test("taac2026 CLI dispatches experiment helper commands", async () => {
+  const { stdout: doctorHelp } = await execFileAsync(process.execPath, [cliPath, "submit", "doctor", "--help"], { cwd: toolDir });
+  const { stdout: compareHelp } = await execFileAsync(process.execPath, [cliPath, "compare", "jobs", "--help"], { cwd: toolDir });
+
+  assert.match(doctorHelp, /submit doctor/);
+  assert.match(compareHelp, /compare jobs/);
 });

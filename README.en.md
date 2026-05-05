@@ -84,6 +84,8 @@ Most importantly, metrics should be compared by an agent across runs, not by hum
 | Compare configs | `taiji-output/config-diffs/*.json` or Markdown |
 | Prepare submit bundle | `taiji-output/submit-bundle/` |
 | Dry-run / live submit | `taiji-output/submit-live/<timestamp>/` |
+| Submit safety / read-back verification | `submit doctor`, `submit verify` |
+| Experiment evidence tools | `compare jobs`, `config diff-ref`, `ledger sync`, `diagnose job` |
 
 ## Quick Start
 
@@ -125,6 +127,42 @@ taac2026 diff-config old-config.yaml new-config.yaml --json --out diff.json
 ```
 
 `--out diff.json` writes to `taiji-output/config-diffs/diff.json`, not the repository root.
+
+## Daily Experiment Tools
+
+These commands organize evidence and catch avoidable mistakes. They do not decide which experiment is best.
+
+Check a prepared bundle before submit:
+
+```bash
+taac2026 submit doctor --bundle taiji-output/submit-bundle
+```
+
+After submit, scrape the new Job and verify the platform-side `code.zip/config.yaml/run.sh` against the local bundle:
+
+```bash
+taac2026 scrape --all --job-internal-id 56242 --cookie-file taiji-output/secrets/taiji-cookie.txt --direct
+taac2026 submit verify --bundle taiji-output/submit-bundle --job-internal-id 56242
+```
+
+Compare multiple Jobs as an evidence table with metrics, manually recorded test scores, and curve summaries:
+
+```bash
+taac2026 compare jobs 56242 58244 --json
+```
+
+Compare a local config against one explicit Job reference, without assuming any "best score" policy:
+
+```bash
+taac2026 config diff-ref --config config.yaml --job-internal-id 56242 --json
+```
+
+Sync a structured experiment ledger, or extract diagnosis evidence from a failed Job:
+
+```bash
+taac2026 ledger sync
+taac2026 diagnose job --job-internal-id 56242 --json
+```
 
 ## Submit Training
 
@@ -299,7 +337,7 @@ Good fits:
 - Compare two experiment `config.yaml` files.
 - Archive code, logs, checkpoints, and metrics for each Job.
 - Submit the next code/config pair using a known-good template Job.
-- Let an agent use experiment history to reason about whether the next run is worth spending.
+- Let an agent organize historical evidence before humans and agents reason about next-step strategy together.
 
 Poor fits:
 
@@ -316,6 +354,7 @@ Poor fits:
 | `scripts/compare-config-yaml.mjs` | Semantically compare two YAML configs |
 | `scripts/prepare-taiji-submit.mjs` | Prepare a local submit bundle and record Git state |
 | `scripts/submit-taiji.mjs` | Dry-run or explicitly execute upload, Job creation, and Run |
+| `scripts/experiment-tools.mjs` | Submit doctor, submit verify, Job comparison, ledger sync, and log diagnosis |
 
 ## Troubleshooting
 

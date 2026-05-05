@@ -54,6 +54,19 @@ taac2026 diff-config old-config.yaml new-config.yaml
 taac2026 diff-config old-config.yaml new-config.yaml --json --out diff.json
 ```
 
+Daily experiment evidence tools:
+
+```bash
+taac2026 submit doctor --bundle taiji-output/submit-bundle
+taac2026 submit verify --bundle taiji-output/submit-bundle --job-internal-id <JOB_INTERNAL_ID>
+taac2026 compare jobs <JOB_INTERNAL_ID...> --json
+taac2026 config diff-ref --config config.yaml --job-internal-id <JOB_INTERNAL_ID> --json
+taac2026 ledger sync
+taac2026 diagnose job --job-internal-id <JOB_INTERNAL_ID> --json
+```
+
+Use these commands to collect evidence and catch mistakes; do not present them as automatic experiment decision makers.
+
 Prepare a local-agent experiment submission package:
 
 ```bash
@@ -117,6 +130,7 @@ The scraper writes to `taiji-output/` by default:
 - `code/<jobId>/files/...`: best-effort downloaded training code files, preserving path structure when possible.
 - `browser-profile/`: Playwright persistent browser state for interactive auth fallback.
 - `config-diffs/`: config diff files when `compare-config-yaml.mjs --out <file>` is used with a relative path.
+- `ledger/experiments.json`: structured experiment ledger from `ledger sync`.
 - `submit-bundle/`: default prepared local submission bundle.
 - `submit-live/<timestamp>/`: dry-run plans and live submit/run results.
 - `secrets/`: recommended local location for `taiji-cookie.txt` or captured headers. Never commit this directory.
@@ -150,6 +164,18 @@ The intended live workflow is:
 7. Optionally click Run and return the new Job ID, Job URL, and instance result.
 
 Live submit uses the captured "Copy Job -> upload trainFiles to COS -> submit -> run" flow. Load `references/submit-workflow.md` before debugging live submission.
+
+## Experiment Evidence Workflow
+
+Use `submit doctor` before live submit to check bundle file hashes, zip/config/run.sh validity, dirty Git state, and obvious name/description/config mismatches.
+
+Use `submit verify` after scraping the submitted Job to compare platform-side trainFiles and log `Resolved config` against the local bundle. If hashes mismatch, treat the Job as suspect until the upload path is explained.
+
+Use `compare jobs` to gather metric evidence across explicit Jobs. It reports summaries and manually recorded test scores from Job text, but its `decision` field remains `not_provided`.
+
+Use `config diff-ref` only against an explicit reference Job. Do not infer "highest score" or "best config" unless the user supplies that policy.
+
+Use `ledger sync` to persist structured experiment history under `taiji-output/ledger/experiments.json`, and `diagnose job` to collect errors, log tails, and resolved configs for debugging.
 
 ## Implementation Notes
 

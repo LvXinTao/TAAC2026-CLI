@@ -29,6 +29,12 @@ Incremental sync still scans the full Job list, but skips deep fetching for cach
 taac2026 scrape --all --incremental --cookie-file taiji-output/secrets/taiji-cookie.txt --direct
 ```
 
+For targeted debugging of one platform Job:
+
+```bash
+taac2026 scrape --all --job-internal-id 56242 --cookie-file taiji-output/secrets/taiji-cookie.txt --direct
+```
+
 For servers where Chromium page fetch fails, use backend direct HTTP mode:
 
 ```bash
@@ -151,7 +157,8 @@ Live submit uses the captured "Copy Job -> upload trainFiles to COS -> submit ->
 - Instance list endpoint is POST with JSON body, not query params.
 - Metrics endpoint may return each metric as an array of chart objects; flatten all charts.
 - Job list rows do not include training code files. Fetch Job detail via `/taskmanagement/api/v1/webtasks/external/task/{jobInternalId}` and read all of `data.trainFiles`, not only `config.yaml`.
-- Training code file download depends on whether `trainFiles[].path` is a directly fetchable URL/path. Always save `job-detail.json` and `train-files.json` even when some file content downloads fail.
+- Training code files usually store COS keys in `trainFiles[].path`. Use `/aide/api/evaluation_tasks/get_federation_token/` and COS `getObject` before falling back to direct URL fetch.
+- Validate downloaded trainFiles before saving: reject Taiji frontend HTML, size mismatches, bad zip magic for `.zip`, non-mapping `config.yaml`, and invalid JSON. Always save `job-detail.json` and `train-files.json` even when some file content downloads fail.
 - Some failed or interrupted instances legitimately have zero metrics.
 - `--direct` bypasses Chromium and uses Node `fetch` with the Cookie header. It helps on headless servers, but it cannot fix an expired, IP-bound, or fingerprint-bound login token.
 - The output CSV can be large. Prefer streaming or long-form CSV for downstream analysis instead of loading the whole file into memory for ad hoc transformations.

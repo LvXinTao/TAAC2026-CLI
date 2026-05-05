@@ -105,6 +105,12 @@ Incremental sync still scans the full Job list, but skips detail, code, instance
 taac2026 scrape --all --incremental --cookie-file taiji-output/secrets/taiji-cookie.txt --direct
 ```
 
+To inspect one Job's detail, code files, and metrics, target the internal Taiji ID:
+
+```bash
+taac2026 scrape --all --job-internal-id 56242 --cookie-file taiji-output/secrets/taiji-cookie.txt --direct
+```
+
 Use direct backend mode when Chromium is unreliable on a server:
 
 ```bash
@@ -317,7 +323,7 @@ Poor fits:
 - Playwright fails but `--direct` works: prefer `--direct`.
 - Both modes return `401`: test a full `Copy as cURL` on the same machine first.
 - Instances exist but metrics are empty: the task may have failed, produced no metrics, or the API shape may have changed.
-- Code download fails: inspect `code/<jobId>/job-detail.json` and `train-files.json` to see whether Taiji returned plain URLs or COS paths.
+- Code download fails: inspect `code/<jobId>/job-detail.json` and `train-files.json`. The scraper first treats `trainFiles[].path` as a COS key and downloads with the federation token; if it receives the Taiji frontend HTML, a bad zip magic header, a non-mapping `config.yaml`, or a size mismatch, it marks the download as failed instead of silently saving a fake file.
 
 ## Development Check
 

@@ -1,13 +1,21 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import yaml from "js-yaml";
 import { chromium } from "playwright";
+
+const require = createRequire(import.meta.url);
+const COS = require("cos-nodejs-sdk-v5");
 
 const DEFAULT_URL =
   "https://taiji.algo.qq.com/training/ckpt/angel_training_ams_2026_1029735554728157691_20260505053802_1b5f3f87/56737/95cdb55f9de411b5019df4ed57762755";
 const TRAINING_URL = "https://taiji.algo.qq.com/training";
 const DEFAULT_API_AUTH_WAIT_MS = 180_000;
 const DEFAULT_OUT_ROOT = "taiji-output";
+const BUCKET = "hunyuan-external-1258344706";
+const REGION = "ap-guangzhou";
+export const DOWNLOAD_VALIDATION_VERSION = 2;
 
 const METRIC_SAFE_NAME = /[^a-zA-Z0-9._-]+/g;
 
@@ -37,6 +45,8 @@ function parseArgs(argv) {
     else if (arg === "--timeout" && argv[i + 1]) args.timeoutMs = Number(argv[++i]);
     else if (arg === "--auth-timeout" && argv[i + 1]) args.authTimeoutMs = Number(argv[++i]);
     else if (arg === "--page-size" && argv[i + 1]) args.pageSize = Number(argv[++i]);
+    else if (arg === "--job-internal-id" && argv[i + 1]) args.jobInternalId = String(argv[++i]);
+    else if (arg === "--job-id" && argv[i + 1]) args.jobId = String(argv[++i]);
     else if (!arg.startsWith("--")) args.url = arg;
   }
 
@@ -227,6 +237,7 @@ function isTerminalJob(job) {
 function hasCompleteCachedDeepSync(current) {
   if (!current) return false;
   if (!current.code || current.code.error) return false;
+  if (current.code.downloadVersion !== DOWNLOAD_VALIDATION_VERSION) return false;
   const instances = Object.values(current.instancesById ?? {});
   if (!instances.length) return false;
   return instances.every((instance) => !instance?.error);
@@ -241,6 +252,12 @@ export function shouldSkipJobDeepSync(current, listedJob, options = {}) {
   if ((current.status ?? "") !== (listedJob.status ?? current.status ?? "")) return { skip: false, reason: "status_changed" };
   if ((current.jzStatus ?? "") !== (listedJob.jzStatus ?? current.jzStatus ?? "")) return { skip: false, reason: "jz_status_changed" };
   return { skip: true, reason: "unchanged_terminal_job" };
+}
+
+export function filterJobsForArgs(jobs, args = {}) {
+  if (args.jobInternalId) return jobs.filter((job) => String(job.id ?? "") === String(args.jobInternalId));
+  if (args.jobId) return jobs.filter((job) => String(job.taskID ?? "") === String(args.jobId));
+  return jobs;
 }
 
 async function readJsonIfExists(filePath, fallback) {
@@ -456,14 +473,42 @@ async function fetchJobDetail(page, jobInternalId, authWaitMs) {
   return fetchJsonFromPage(page, `/taskmanagement/api/v1/webtasks/external/task/${jobInternalId}`, { authWaitMs });
 }
 
+async function fetchFederationToken(page, authWaitMs) {
+  const token = await fetchJsonFromPage(page, "/aide/api/evaluation_tasks/get_federation_token/", { authWaitMs });
+  for (const key of ["id", "key", "Token"]) {
+    if (!token?.[key]) throw new Error(`Federation token missing ${key}`);
+  }
+  return token;
+}
+
 function extractTrainFiles(jobDetail) {
   const data = jobDetail?.data ?? jobDetail;
   const files = data?.trainFiles ?? data?.train_files ?? [];
   return Array.isArray(files) ? files : [];
 }
 
-async function fetchTextResource(page, resourceUrl, options = {}) {
-  if (isDirectClient(page)) return fetchTextDirect(page, resourceUrl, options);
+function getCosObject(cos, params) {
+  return new Promise((resolve, reject) => {
+    cos.getObject(params, (error, data) => {
+      if (error) reject(error);
+      else resolve(data);
+    });
+  });
+}
+
+async function fetchCosResource(cos, key) {
+  const data = await getCosObject(cos, { Bucket: BUCKET, Region: REGION, Key: key });
+  return {
+    ok: true,
+    status: 200,
+    statusText: "OK",
+    contentType: data.headers?.["content-type"] ?? data.ContentType ?? "",
+    buffer: Buffer.isBuffer(data.Body) ? data.Body : Buffer.from(data.Body ?? ""),
+  };
+}
+
+async function fetchBinaryResource(page, resourceUrl, options = {}) {
+  if (isDirectClient(page)) return fetchBinaryDirect(page, resourceUrl, options);
 
   const result = await page.evaluate(async ({ url }) => {
     const response = await fetch(url, {
@@ -475,15 +520,20 @@ async function fetchTextResource(page, resourceUrl, options = {}) {
       status: response.status,
       statusText: response.statusText,
       contentType: response.headers.get("content-type"),
-      text: await response.text(),
+      bytes: Array.from(new Uint8Array(await response.arrayBuffer())),
     };
   }, { url: resourceUrl });
 
   if (!result.ok) throw new Error(`HTTP ${result.status} ${result.statusText}`);
-  return result;
+  return { ...result, buffer: Buffer.from(result.bytes), bytes: undefined };
 }
 
-export async function fetchTextDirect(client, resourceUrl) {
+async function fetchTextResource(page, resourceUrl, options = {}) {
+  const result = await fetchBinaryResource(page, resourceUrl, options);
+  return { ...result, text: result.buffer.toString("utf8") };
+}
+
+async function fetchBinaryDirect(client, resourceUrl) {
   const response = await fetch(resourceUrl, {
     headers: {
       accept: "*/*",
@@ -498,18 +548,76 @@ export async function fetchTextDirect(client, resourceUrl) {
     status: response.status,
     statusText: response.statusText,
     contentType: response.headers.get("content-type"),
-    text: await response.text(),
+    buffer: Buffer.from(await response.arrayBuffer()),
   };
   if (!result.ok) throw new Error(`HTTP ${result.status} ${result.statusText}`);
   return result;
 }
 
-function candidateFileUrls(file) {
+export async function fetchTextDirect(client, resourceUrl) {
+  const result = await fetchBinaryDirect(client, resourceUrl);
+  return { ...result, text: result.buffer.toString("utf8") };
+}
+
+function isCosKey(rawPath) {
+  return /(^|\/)train\/local--[^/]+\/[^/]+$/i.test(String(rawPath ?? ""));
+}
+
+function candidateFileSources(file) {
   const rawPath = file?.path ?? file?.url ?? "";
   if (!rawPath) return [];
-  if (/^https?:\/\//i.test(rawPath)) return [rawPath];
+  if (/^https?:\/\//i.test(rawPath)) return [{ kind: "url", url: rawPath }];
   const trimmed = String(rawPath).replace(/^\/+/, "");
-  return [`https://taiji.algo.qq.com/${trimmed}`];
+  const sources = [];
+  if (isCosKey(trimmed)) sources.push({ kind: "cos", key: trimmed });
+  sources.push({ kind: "url", url: `https://taiji.algo.qq.com/${trimmed}` });
+  return sources;
+}
+
+function sourceLabel(source) {
+  return source.kind === "cos" ? `cos://${BUCKET}/${source.key}` : source.url;
+}
+
+function looksLikeHtml(buffer, contentType) {
+  const head = buffer.subarray(0, 512).toString("utf8").trimStart().toLowerCase();
+  return String(contentType ?? "").toLowerCase().includes("text/html") || head.startsWith("<!doctype html") || head.startsWith("<html");
+}
+
+function hasZipMagic(buffer) {
+  return (
+    buffer.length >= 4 &&
+    buffer[0] === 0x50 &&
+    buffer[1] === 0x4b &&
+    [0x03, 0x05, 0x07].includes(buffer[2]) &&
+    [0x04, 0x06, 0x08].includes(buffer[3])
+  );
+}
+
+export function validateTrainFileDownload(file, download) {
+  const name = String(file?.name ?? path.basename(file?.path ?? file?.url ?? "file"));
+  const buffer = download?.buffer;
+  if (!Buffer.isBuffer(buffer)) throw new Error(`${name}: downloaded body is not a Buffer`);
+  if (!buffer.length) throw new Error(`${name}: downloaded file is empty`);
+  if (looksLikeHtml(buffer, download?.contentType)) throw new Error(`${name}: downloaded an HTML page instead of a trainFile`);
+
+  const expectedSize = Number(file?.size);
+  if (Number.isFinite(expectedSize) && expectedSize > 0 && buffer.length !== expectedSize) {
+    throw new Error(`${name}: size mismatch, expected ${expectedSize} bytes, got ${buffer.length}`);
+  }
+
+  const lowerName = name.toLowerCase();
+  if (lowerName.endsWith(".zip") && !hasZipMagic(buffer)) {
+    throw new Error(`${name}: ZIP magic mismatch`);
+  }
+  if (lowerName.endsWith(".yaml") || lowerName.endsWith(".yml")) {
+    const parsed = yaml.load(buffer.toString("utf8"));
+    if (lowerName === "config.yaml" && (!parsed || typeof parsed !== "object" || Array.isArray(parsed))) {
+      throw new Error(`${name}: expected YAML mapping`);
+    }
+  }
+  if (lowerName.endsWith(".json")) JSON.parse(buffer.toString("utf8"));
+
+  return { bytes: buffer.length, contentType: download?.contentType ?? "" };
 }
 
 function rowsForAllJobs(jobsById) {
@@ -594,6 +702,19 @@ async function saveJobCodeFiles(page, outputDir, jobId, jobDetail, authWaitMs) {
 
   const trainFiles = extractTrainFiles(jobDetail);
   const saved = [];
+  let cosClient = null;
+
+  async function getCosClient() {
+    if (!cosClient) {
+      const token = await fetchFederationToken(page, authWaitMs);
+      cosClient = new COS({
+        SecretId: token.id,
+        SecretKey: token.key,
+        SecurityToken: token.Token,
+      });
+    }
+    return cosClient;
+  }
 
   for (const file of trainFiles) {
     const name = file.name ?? path.basename(file.path ?? file.url ?? "file");
@@ -601,17 +722,32 @@ async function saveJobCodeFiles(page, outputDir, jobId, jobDetail, authWaitMs) {
     const meta = { name, path: file.path ?? file.url ?? "", size: file.size, mtime: file.mtime };
     let lastError = "";
 
-    for (const url of candidateFileUrls(file)) {
+    const sources = candidateFileSources(file);
+    if (!sources.length) lastError = "No downloadable trainFile path found";
+
+    for (const source of sources) {
       try {
-        const response = await fetchTextResource(page, url, { authWaitMs });
+        const response =
+          source.kind === "cos"
+            ? await fetchCosResource(await getCosClient(), source.key)
+            : await fetchBinaryResource(page, source.url, { authWaitMs });
+        const validation = validateTrainFileDownload(file, response);
         const relativePath = path.join("code", jobId, "files", relativeFilePath);
         await mkdir(path.dirname(path.join(outputDir, relativePath)), { recursive: true });
-        await writeFile(path.join(outputDir, relativePath), response.text, "utf8");
-        saved.push({ ...meta, saved: true, relativePath, url, contentType: response.contentType });
+        await writeFile(path.join(outputDir, relativePath), response.buffer);
+        saved.push({
+          ...meta,
+          saved: true,
+          relativePath,
+          source: sourceLabel(source),
+          contentType: validation.contentType,
+          bytes: validation.bytes,
+          validationVersion: DOWNLOAD_VALIDATION_VERSION,
+        });
         lastError = "";
         break;
       } catch (error) {
-        lastError = error instanceof Error ? error.message : String(error);
+        lastError = `${sourceLabel(source)}: ${error instanceof Error ? error.message : String(error)}`;
       }
     }
 
@@ -619,7 +755,12 @@ async function saveJobCodeFiles(page, outputDir, jobId, jobDetail, authWaitMs) {
   }
 
   await writeFile(path.join(codeDir, "train-files.json"), JSON.stringify({ trainFiles, saved }, null, 2), "utf8");
-  return { path: path.join("code", jobId), files: trainFiles.length, saved: saved.filter((file) => file.saved).length };
+  return {
+    path: path.join("code", jobId),
+    files: trainFiles.length,
+    saved: saved.filter((file) => file.saved).length,
+    downloadVersion: DOWNLOAD_VALIDATION_VERSION,
+  };
 }
 
 async function scrapeAllTrainingJobs(page, args, outputDir) {
@@ -628,11 +769,15 @@ async function scrapeAllTrainingJobs(page, args, outputDir) {
   const jobsFile = path.join(outputDir, "jobs.json");
   const existing = await readJsonIfExists(jobsFile, { jobsById: {} });
   const jobsById = existing.jobsById ?? {};
-  const jobs = await fetchTrainingJobs(page, args.pageSize, args.authTimeoutMs);
+  const listedJobs = await fetchTrainingJobs(page, args.pageSize, args.authTimeoutMs);
+  const jobs = filterJobsForArgs(listedJobs, args);
   const syncStartedAt = new Date().toISOString();
-  const syncStats = { jobsListed: jobs.length, deepFetched: 0, skippedDeepSync: 0, failedDeepFetch: 0 };
+  const syncStats = { jobsListed: listedJobs.length, jobsMatched: jobs.length, deepFetched: 0, skippedDeepSync: 0, failedDeepFetch: 0 };
 
-  console.log(`Found ${jobs.length} jobs`);
+  console.log(args.jobInternalId || args.jobId ? `Found ${jobs.length} matching jobs` : `Found ${jobs.length} jobs`);
+  if ((args.jobInternalId || args.jobId) && jobs.length === 0) {
+    throw new Error(`No job matched ${args.jobInternalId ? `--job-internal-id ${args.jobInternalId}` : `--job-id ${args.jobId}`}`);
+  }
 
   for (const job of jobs) {
     const jobId = job.taskID;

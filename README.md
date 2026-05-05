@@ -105,6 +105,12 @@ taac2026 scrape --all --cookie-file taiji-output/secrets/taiji-cookie.txt --head
 taac2026 scrape --all --incremental --cookie-file taiji-output/secrets/taiji-cookie.txt --direct
 ```
 
+只核查某个 Job 的详情、代码文件和指标时，可以按平台内部 ID 定向抓取：
+
+```bash
+taac2026 scrape --all --job-internal-id 56242 --cookie-file taiji-output/secrets/taiji-cookie.txt --direct
+```
+
 服务器上 Chromium 不稳定时，用后端直连模式：
 
 ```bash
@@ -317,7 +323,7 @@ taiji-output/
 - Playwright 失败但 `--direct` 成功：优先用 `--direct`。
 - 两种模式都 `401`：先在同一机器上测试完整 `Copy as cURL`。
 - Job 有实例但指标为空：可能是任务失败、实例未产出 metrics，或平台响应结构变化。
-- 代码文件下载失败：先看 `code/<jobId>/job-detail.json` 和 `train-files.json`，确认平台给的是普通 URL 还是 COS 路径。
+- 代码文件下载失败：先看 `code/<jobId>/job-detail.json` 和 `train-files.json`。脚本会优先把 `trainFiles[].path` 当 COS key，用 federation token 下载；如果拿到平台前端 HTML、zip 魔数不对、`config.yaml` 不是 mapping，或大小不匹配，会标为失败而不是悄悄保存假文件。
 
 ## 开发验证
 

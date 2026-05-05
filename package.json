@@ -9,6 +9,7 @@
     "diff:config": "node scripts/compare-config-yaml.mjs",
     "prepare:submit": "node scripts/prepare-taiji-submit.mjs",
     "submit": "node scripts/submit-taiji.mjs",
+    "test": "node --test scripts/tests/*.test.mjs",
     "check": "node --check scripts/scrape-taiji.mjs && node --check scripts/compare-config-yaml.mjs && node --check scripts/prepare-taiji-submit.mjs && node --check scripts/submit-taiji.mjs"
   },
   "dependencies": {

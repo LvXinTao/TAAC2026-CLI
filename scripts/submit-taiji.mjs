@@ -4,6 +4,7 @@ import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { createRequire } from "node:module";
+import { fileURLToPath } from "node:url";
 
 const require = createRequire(import.meta.url);
 const COS = require("cos-nodejs-sdk-v5");
@@ -28,6 +29,7 @@ Options:
   --execute                         Actually upload files and create the Job. Default is dry-run.
   --run                             Start the new Job after creation.
   --yes                             Required together with --execute.
+  --allow-add-file                  Allow uploaded files absent from the template trainFiles.
   --out <dir>                       Output directory. Relative paths are placed under taiji-output/. Default: taiji-output/submit-live/<timestamp>.
   --help                            Show this help.
 
@@ -35,13 +37,14 @@ Dry-run is the default. It never uploads files, creates jobs, or starts jobs.`;
 }
 
 function parseArgs(argv) {
-  const args = { execute: false, run: false, yes: false };
+  const args = { allowAddFile: false, execute: false, run: false, yes: false };
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
     if (arg === "--help" || arg === "-h") args.help = true;
     else if (arg === "--execute") args.execute = true;
     else if (arg === "--run") args.run = true;
     else if (arg === "--yes") args.yes = true;
+    else if (arg === "--allow-add-file") args.allowAddFile = true;
     else if (arg.startsWith("--")) {
       const key = arg.slice(2).replace(/-([a-z])/g, (_, c) => c.toUpperCase());
       const value = argv[i + 1];
@@ -60,7 +63,14 @@ function required(value, message) {
   return value;
 }
 
-function resolveTaijiOutputDir(outDir) {
+function assertSafeRelativeOutputPath(outDir) {
+  if (!path.isAbsolute(outDir) && String(outDir).split(/[\\/]+/).includes("..")) {
+    throw new Error("Relative output paths must not contain '..'. Use an absolute path for custom locations outside taiji-output.");
+  }
+}
+
+export function resolveTaijiOutputDir(outDir) {
+  assertSafeRelativeOutputPath(outDir);
   if (path.isAbsolute(outDir)) return outDir;
   if (outDir.split(/[\\/]/)[0] === DEFAULT_OUT_ROOT) return path.resolve(outDir);
   return path.resolve(DEFAULT_OUT_ROOT, outDir);
@@ -118,9 +128,14 @@ async function fetchJson(cookieHeader, endpoint, options = {}) {
 async function loadBundle(bundleDir) {
   const manifestPath = path.join(bundleDir, "manifest.json");
   const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
-  const codeZip = path.resolve(bundleDir, manifest.files.codeZip.preparedPath);
-  const config = path.resolve(bundleDir, manifest.files.config.preparedPath);
-  return { manifest, codeZip, config };
+  const codeZip = manifest.files.codeZip?.preparedPath ? path.resolve(bundleDir, manifest.files.codeZip.preparedPath) : null;
+  const config = manifest.files.config?.preparedPath ? path.resolve(bundleDir, manifest.files.config.preparedPath) : null;
+  const runSh = manifest.files.runSh?.preparedPath ? path.resolve(bundleDir, manifest.files.runSh.preparedPath) : null;
+  const genericFiles = (manifest.files.genericFiles ?? []).map((file) => ({
+    name: file.name,
+    path: path.resolve(bundleDir, file.preparedPath),
+  }));
+  return { manifest, codeZip, config, runSh, genericFiles };
 }
 
 async function fileMeta(filePath) {
@@ -145,6 +160,14 @@ function inferCosPrefix(templateData) {
 
 function newCosKey(prefix, filename) {
   return `${prefix}/train/local--${randomUUID().replaceAll("-", "")}/${filename}`;
+}
+
+function contentTypeForTrainFile(name) {
+  if (name.endsWith(".zip")) return "application/x-zip-compressed";
+  if (name.endsWith(".sh")) return "text/x-shellscript";
+  if (name.endsWith(".py")) return "text/x-python";
+  if (name.endsWith(".yaml") || name.endsWith(".yml")) return "";
+  return "";
 }
 
 async function getFederationToken(cookieHeader) {
@@ -183,27 +206,34 @@ async function uploadToCos(cookieHeader, localPath, key, contentType) {
   return { key, bytes: s.size };
 }
 
-function replaceTrainFiles(templateFiles, uploaded) {
+export function replaceTrainFiles(templateFiles, uploaded, options = {}) {
   const byName = new Map(uploaded.map((file) => [file.name, file]));
   const next = [];
+  const matchedNames = new Set();
   for (const file of templateFiles || []) {
     if (byName.has(file.name)) {
       next.push(byName.get(file.name));
-      byName.delete(file.name);
+      matchedNames.add(file.name);
     } else {
       next.push(file);
     }
   }
-  for (const file of byName.values()) next.push(file);
+  const missing = uploaded.filter((file) => !matchedNames.has(file.name));
+  if (missing.length && !options.allowAddFile) {
+    throw new Error(`Template trainFiles does not contain required file: ${missing.map((file) => file.name).join(", ")}`);
+  }
+  if (options.allowAddFile) {
+    for (const file of missing) next.push(file);
+  }
   return next;
 }
 
-function buildTaskPayload(templateData, job, uploadedTrainFiles) {
+function buildTaskPayload(templateData, job, uploadedTrainFiles, options = {}) {
   return {
     ...templateData,
     name: job.name,
     description: job.description || "",
-    trainFiles: replaceTrainFiles(templateData.trainFiles || [], uploadedTrainFiles),
+    trainFiles: replaceTrainFiles(templateData.trainFiles || [], uploadedTrainFiles, options),
   };
 }
 
@@ -224,7 +254,7 @@ async function main() {
   const bundleDir = path.resolve(required(args.bundle, "Missing --bundle"));
   const defaultOut = path.join(DEFAULT_SUBMIT_LIVE_DIR, new Date().toISOString().replace(/[:.]/g, "-"));
   const outDir = resolveTaijiOutputDir(args.out || defaultOut);
-  const { manifest, codeZip, config } = await loadBundle(bundleDir);
+  const { manifest, codeZip, config, runSh, genericFiles } = await loadBundle(bundleDir);
   const templateJobUrl = args.templateJobUrl || manifest.templateJobUrl;
   const templateJobInternalId = args.templateJobInternalId || inferInternalId(templateJobUrl);
   required(templateJobInternalId, "Missing --template-job-internal-id, and it could not be inferred from template URL");
@@ -234,14 +264,25 @@ async function main() {
   };
   required(job.name, "Missing --name and bundle manifest has no job.name");
 
-  const [zipMeta, configMeta] = await Promise.all([fileMeta(codeZip), fileMeta(config)]);
+  const [zipMeta, configMeta, runShMeta, genericFileMetas] = await Promise.all([
+    codeZip ? fileMeta(codeZip) : null,
+    config ? fileMeta(config) : null,
+    runSh ? fileMeta(runSh) : null,
+    Promise.all(genericFiles.map(async (file) => ({ ...file, ...(await fileMeta(file.path)) }))),
+  ]);
   const plan = {
     mode: args.execute ? "execute" : "dry-run",
     templateJobUrl,
     templateJobInternalId,
     runAfterSubmit: Boolean(args.run || manifest.runAfterSubmit),
+    allowAddFile: Boolean(args.allowAddFile),
     job,
-    files: { codeZip: { path: codeZip, ...zipMeta }, config: { path: config, ...configMeta } },
+    files: {
+      ...(codeZip ? { codeZip: { path: codeZip, ...zipMeta } } : {}),
+      ...(config ? { config: { path: config, ...configMeta } } : {}),
+      ...(runSh ? { runSh: { path: runSh, ...runShMeta } } : {}),
+      ...(genericFileMetas.length ? { genericFiles: genericFileMetas } : {}),
+    },
   };
 
   if (args.execute && !args.yes) throw new Error("--execute requires --yes");
@@ -257,13 +298,22 @@ async function main() {
   const templateData = template.data;
   if (!templateData?.trainFiles) throw new Error("Template detail response has no data.trainFiles");
   const cosPrefix = inferCosPrefix(templateData);
-  const codeKey = newCosKey(cosPrefix, zipMeta.basename);
-  const configKey = newCosKey(cosPrefix, configMeta.basename);
+  const codeKey = codeZip ? newCosKey(cosPrefix, zipMeta.basename) : null;
+  const configKey = config ? newCosKey(cosPrefix, configMeta.basename) : null;
   const uploadedTrainFiles = [
-    { name: "code.zip", path: codeKey, mtime: formatTaijiTime(), size: zipMeta.bytes },
-    { name: "config.yaml", path: configKey, mtime: formatTaijiTime(), size: configMeta.bytes },
+    ...(codeZip ? [{ name: "code.zip", path: codeKey, mtime: formatTaijiTime(), size: zipMeta.bytes }] : []),
+    ...(config ? [{ name: "config.yaml", path: configKey, mtime: formatTaijiTime(), size: configMeta.bytes }] : []),
+    ...(runSh
+      ? [{ name: "run.sh", path: newCosKey(cosPrefix, runShMeta.basename), mtime: formatTaijiTime(), size: runShMeta.bytes }]
+      : []),
+    ...genericFileMetas.map((file) => ({
+      name: file.name,
+      path: newCosKey(cosPrefix, file.name),
+      mtime: formatTaijiTime(),
+      size: file.bytes,
+    })),
   ];
-  const taskPayload = buildTaskPayload(templateData, job, uploadedTrainFiles);
+  const taskPayload = buildTaskPayload(templateData, job, uploadedTrainFiles, { allowAddFile: args.allowAddFile });
   const networkPlan = { ...plan, cosPrefix, uploadedTrainFiles, taskPayloadPreview: safeResult(taskPayload) };
 
   await mkdir(outDir, { recursive: true });
@@ -276,8 +326,16 @@ async function main() {
   }
 
   const uploadResults = [];
-  uploadResults.push(await uploadToCos(cookieHeader, codeZip, codeKey, "application/x-zip-compressed"));
-  uploadResults.push(await uploadToCos(cookieHeader, config, configKey, ""));
+  if (codeZip) uploadResults.push(await uploadToCos(cookieHeader, codeZip, codeKey, "application/x-zip-compressed"));
+  if (config) uploadResults.push(await uploadToCos(cookieHeader, config, configKey, ""));
+  if (runSh) {
+    const runShFile = uploadedTrainFiles.find((file) => file.name === "run.sh");
+    uploadResults.push(await uploadToCos(cookieHeader, runSh, runShFile.path, "text/x-shellscript"));
+  }
+  for (const file of genericFileMetas) {
+    const uploadedFile = uploadedTrainFiles.find((candidate) => candidate.name === file.name);
+    uploadResults.push(await uploadToCos(cookieHeader, file.path, uploadedFile.path, contentTypeForTrainFile(file.name)));
+  }
   const created = await fetchJson(cookieHeader, "/taskmanagement/api/v1/webtasks/external/task", {
     method: "POST",
     body: taskPayload,
@@ -311,7 +369,9 @@ async function main() {
   console.log(`Wrote live result: ${path.join(outDir, "result.json")}`);
 }
 
-main().catch((error) => {
-  console.error(error.message || error);
-  process.exitCode = 1;
-});
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  main().catch((error) => {
+    console.error(error.message || error);
+    process.exitCode = 1;
+  });
+}

@@ -1,5 +1,6 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
 
 const DEFAULT_URL =
@@ -16,6 +17,7 @@ function parseArgs(argv) {
     all: false,
     outDir: DEFAULT_OUT_ROOT,
     headless: false,
+    incremental: false,
     timeoutMs: 120_000,
     pageSize: 100,
   };
@@ -31,6 +33,7 @@ function parseArgs(argv) {
     else if (arg === "--cookie-file" && argv[i + 1]) args.cookieFile = argv[++i];
     else if (arg === "--direct") args.direct = true;
     else if (arg === "--headless") args.headless = true;
+    else if (arg === "--incremental") args.incremental = true;
     else if (arg === "--timeout" && argv[i + 1]) args.timeoutMs = Number(argv[++i]);
     else if (arg === "--auth-timeout" && argv[i + 1]) args.authTimeoutMs = Number(argv[++i]);
     else if (arg === "--page-size" && argv[i + 1]) args.pageSize = Number(argv[++i]);
@@ -42,7 +45,14 @@ function parseArgs(argv) {
   return args;
 }
 
-function resolveTaijiOutputDir(outDir) {
+function assertSafeRelativeOutputPath(outDir) {
+  if (!path.isAbsolute(outDir) && String(outDir).split(/[\\/]+/).includes("..")) {
+    throw new Error("Relative output paths must not contain '..'. Use an absolute path for custom locations outside taiji-output.");
+  }
+}
+
+export function resolveTaijiOutputDir(outDir) {
+  assertSafeRelativeOutputPath(outDir);
   if (path.isAbsolute(outDir)) return outDir;
   if (outDir.split(/[\\/]/)[0] === DEFAULT_OUT_ROOT) return path.resolve(outDir);
   return path.resolve(DEFAULT_OUT_ROOT, outDir);
@@ -206,6 +216,31 @@ function summarizeMetrics(metrics) {
       ];
     }),
   );
+}
+
+function isTerminalJob(job) {
+  const status = String(job?.status ?? "").toUpperCase();
+  const jzStatus = String(job?.jzStatus ?? "").toUpperCase();
+  return jzStatus === "END" || ["SUCCEED", "FAILED", "KILLED", "CANCELED", "CANCELLED"].includes(status);
+}
+
+function hasCompleteCachedDeepSync(current) {
+  if (!current) return false;
+  if (!current.code || current.code.error) return false;
+  const instances = Object.values(current.instancesById ?? {});
+  if (!instances.length) return false;
+  return instances.every((instance) => !instance?.error);
+}
+
+export function shouldSkipJobDeepSync(current, listedJob, options = {}) {
+  if (!options.incremental) return { skip: false, reason: "incremental_disabled" };
+  if (!current) return { skip: false, reason: "new_job" };
+  if (!hasCompleteCachedDeepSync(current)) return { skip: false, reason: "incomplete_cached_job" };
+  if (!isTerminalJob(listedJob)) return { skip: false, reason: "non_terminal_job" };
+  if (current.updateTime !== listedJob.updateTime) return { skip: false, reason: "update_time_changed" };
+  if ((current.status ?? "") !== (listedJob.status ?? current.status ?? "")) return { skip: false, reason: "status_changed" };
+  if ((current.jzStatus ?? "") !== (listedJob.jzStatus ?? current.jzStatus ?? "")) return { skip: false, reason: "jz_status_changed" };
+  return { skip: true, reason: "unchanged_terminal_job" };
 }
 
 async function readJsonIfExists(filePath, fallback) {
@@ -448,7 +483,7 @@ async function fetchTextResource(page, resourceUrl, options = {}) {
   return result;
 }
 
-async function fetchTextDirect(client, resourceUrl) {
+export async function fetchTextDirect(client, resourceUrl) {
   const response = await fetch(resourceUrl, {
     headers: {
       accept: "*/*",
@@ -458,13 +493,15 @@ async function fetchTextDirect(client, resourceUrl) {
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36 Edg/147.0.0.0",
     },
   });
-  return {
+  const result = {
     ok: response.ok,
     status: response.status,
     statusText: response.statusText,
     contentType: response.headers.get("content-type"),
     text: await response.text(),
   };
+  if (!result.ok) throw new Error(`HTTP ${result.status} ${result.statusText}`);
+  return result;
 }
 
 function candidateFileUrls(file) {
@@ -592,6 +629,8 @@ async function scrapeAllTrainingJobs(page, args, outputDir) {
   const existing = await readJsonIfExists(jobsFile, { jobsById: {} });
   const jobsById = existing.jobsById ?? {};
   const jobs = await fetchTrainingJobs(page, args.pageSize, args.authTimeoutMs);
+  const syncStartedAt = new Date().toISOString();
+  const syncStats = { jobsListed: jobs.length, deepFetched: 0, skippedDeepSync: 0, failedDeepFetch: 0 };
 
   console.log(`Found ${jobs.length} jobs`);
 
@@ -613,6 +652,20 @@ async function scrapeAllTrainingJobs(page, args, outputDir) {
       instancesById: current.instancesById ?? {},
     };
 
+    const skipDecision = shouldSkipJobDeepSync(current, job, { incremental: args.incremental });
+    if (skipDecision.skip) {
+      jobRecord.sync = {
+        ...(current.sync ?? {}),
+        skippedDeepSync: true,
+        skipReason: skipDecision.reason,
+        lastSeenAt: syncStartedAt,
+      };
+      jobsById[jobId] = jobRecord;
+      syncStats.skippedDeepSync += 1;
+      console.log(`Job ${jobId}: skipped deep sync (${skipDecision.reason})`);
+      continue;
+    }
+
     try {
       const jobDetail = await fetchJobDetail(page, job.id, args.authTimeoutMs);
       const code = await saveJobCodeFiles(page, outputDir, jobId, jobDetail, args.authTimeoutMs);
@@ -623,6 +676,7 @@ async function scrapeAllTrainingJobs(page, args, outputDir) {
     } catch (error) {
       jobRecord.code = { error: error instanceof Error ? error.message : String(error) };
       console.log(`Job ${jobId}: code files failed: ${error}`);
+      syncStats.failedDeepFetch += 1;
     }
 
     const instances = await fetchJobInstances(page, jobId, args.pageSize, args.authTimeoutMs);
@@ -656,8 +710,16 @@ async function scrapeAllTrainingJobs(page, args, outputDir) {
           error: error instanceof Error ? error.message : String(error),
         };
         console.log(`  Instance ${instanceId}: failed: ${error}`);
+        syncStats.failedDeepFetch += 1;
       }
     }
+
+    jobRecord.sync = {
+      skippedDeepSync: false,
+      lastSeenAt: syncStartedAt,
+      lastDeepFetchedAt: syncStartedAt,
+    };
+    syncStats.deepFetched += 1;
 
     jobsById[jobId] = jobRecord;
   }
@@ -665,6 +727,8 @@ async function scrapeAllTrainingJobs(page, args, outputDir) {
   const result = {
     sourceUrl: TRAINING_URL,
     fetchedAt: new Date().toISOString(),
+    syncMode: args.incremental ? "incremental" : "full",
+    syncStats,
     jobsById,
   };
   const { metricRows, checkpointRows } = rowsForAllJobs(jobsById);
@@ -680,10 +744,18 @@ async function scrapeAllTrainingJobs(page, args, outputDir) {
     status: job.status,
     jzStatus: job.jzStatus,
     updateTime: job.updateTime,
+    syncMode: job.sync?.skippedDeepSync ? "skipped" : "deep",
+    lastSeenAt: job.sync?.lastSeenAt,
+    lastDeepFetchedAt: job.sync?.lastDeepFetchedAt,
     instances: Object.keys(job.instancesById ?? {}).length,
   }))), "utf8");
 
-  console.log(`Saved ${Object.keys(jobsById).length} jobs, ${metricRows.length} metric points, ${checkpointRows.length} checkpoints to ${outputDir}`);
+  console.log(
+    `Saved ${Object.keys(jobsById).length} jobs, ${metricRows.length} metric points, ${checkpointRows.length} checkpoints to ${outputDir}`,
+  );
+  if (args.incremental) {
+    console.log(`Incremental sync: deep_fetched=${syncStats.deepFetched}, skipped=${syncStats.skippedDeepSync}, failed=${syncStats.failedDeepFetch}`);
+  }
 }
 
 async function main() {
@@ -715,7 +787,9 @@ async function main() {
   }
 }
 
-main().catch((error) => {
-  console.error(error);
-  process.exitCode = 1;
-});
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  main().catch((error) => {
+    console.error(error);
+    process.exitCode = 1;
+  });
+}

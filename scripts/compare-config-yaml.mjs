@@ -1,5 +1,6 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import yaml from "js-yaml";
 
 const DEFAULT_OUT_DIR = "taiji-output/config-diffs";
@@ -25,7 +26,14 @@ function parseArgs(argv) {
   return { ...args, oldFile: files[0], newFile: files[1] };
 }
 
-function resolveTaijiOutputFile(outPath) {
+function assertSafeRelativeOutputPath(outPath) {
+  if (!path.isAbsolute(outPath) && String(outPath).split(/[\\/]+/).includes("..")) {
+    throw new Error("Relative output paths must not contain '..'. Use an absolute path for custom locations outside taiji-output.");
+  }
+}
+
+export function resolveTaijiOutputFile(outPath) {
+  assertSafeRelativeOutputPath(outPath);
   if (path.isAbsolute(outPath)) return outPath;
   if (outPath.split(/[\\/]/)[0] === "taiji-output") return path.resolve(outPath);
   if (path.dirname(outPath) === ".") return path.resolve(DEFAULT_OUT_DIR, outPath);
@@ -146,7 +154,9 @@ async function main() {
   }
 }
 
-main().catch((error) => {
-  console.error(error.message);
-  process.exitCode = 1;
-});
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  main().catch((error) => {
+    console.error(error.message);
+    process.exitCode = 1;
+  });
+}

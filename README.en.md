@@ -1,34 +1,43 @@
-# Taiji Metrics Scraper Skill
+# TAAC2026 CLI
 
 [中文](README.md)
 
-Turn the Taiji / TAAC training platform into an experiment workspace that agents can read, compare, archive, submit, and run.
+Turn the Taiji / TAAC training platform into an experiment CLI that humans and agents can read, compare, archive, submit, and run.
 
-This Codex skill targets `https://taiji.algo.qq.com/training`. It can scrape training jobs, metrics, logs, checkpoints, and training code; compare two `config.yaml` files semantically; and prepare or explicitly execute the captured Taiji submit workflow. All local artifacts default to `taiji-output/`, keeping your repository root clean.
+TAAC2026 CLI targets `https://taiji.algo.qq.com/training`. It can scrape training jobs, metrics, logs, checkpoints, and training code; compare two `config.yaml` files semantically; and prepare or explicitly execute the captured Taiji submit workflow. All local artifacts default to `taiji-output/`, keeping your repository root clean.
+
+`SKILL.md` is a universal agent runbook. Codex, Claude Code, OpenAI Agents SDK, Cursor, Aider, or any agent that can read repository files and run shell commands can use this CLI.
 
 ## One-Message Install For Agents
 
-Send this to Codex or another Codex-skill-compatible agent:
+Send this to your agent:
 
 ```text
-Please install and use this Codex skill:
-https://github.com/ZhongKuang/taiji-metrics-scraper-skill.git
+Please install and use this universal agent CLI:
+https://github.com/ZhongKuang/TAAC2026-CLI.git
 
-After installation, run npm install. Install Chromium only when browser mode is needed:
+After installation, run npm install. Run npm link when a global CLI is useful.
+Install Chromium only when browser mode is needed:
 npx playwright install chromium
 ```
 
 Manual installation:
 
 ```bash
-mkdir -p ~/.codex/skills
-git clone https://github.com/ZhongKuang/taiji-metrics-scraper-skill.git ~/.codex/skills/taiji-metrics-scraper
-cd ~/.codex/skills/taiji-metrics-scraper
+git clone https://github.com/ZhongKuang/TAAC2026-CLI.git
+cd TAAC2026-CLI
 npm install
+npm link
 npx playwright install chromium
 ```
 
-If this skill is already bundled inside your project, run `npm install` from `.codex/skills/taiji-metrics-scraper/`.
+Then run:
+
+```bash
+taac2026 --help
+```
+
+If this tool is already bundled inside your project, run `npm install` from `.codex/skills/taiji-metrics-scraper/`, or call `node .codex/skills/taiji-metrics-scraper/bin/taac2026.mjs ...` from the repository root.
 
 ## The Pain: Training Platforms Should Not Own Your Working Memory
 
@@ -38,11 +47,11 @@ Debugging is just as clumsy. When training fails, you open logs, copy and paste 
 
 Submission is another source of silent waste. After writing a promising change, it is easy to upload the wrong zip, forget to replace config, update only the title while leaving old hyperparameters, and discover the mistake several epochs later. Every submit becomes a careful manual ritual.
 
-Most importantly, metrics should be compared by an agent across runs, not by human short-term memory. This skill turns page labor into an archivable, comparable, automatable experiment data flow.
+Most importantly, metrics should be compared by an agent across runs, not by human short-term memory. TAAC2026 CLI turns page labor into an archivable, comparable, automatable experiment data flow.
 
-## What This Skill Solves
+## What It Solves
 
-| Pain | How this skill helps |
+| Pain | How TAAC2026 CLI helps |
 | --- | --- |
 | Opening many instances manually to inspect curves | Bulk scrape Jobs, instances, checkpoints, and metrics into `jobs.json`, `all-metrics-long.csv`, and `all-checkpoints.csv`. |
 | Comparing many metrics by scrolling and memory | Export long-form metrics with `jobId + instanceId + metric + step`, so agents can rank, compare, and summarize across Jobs and reruns. |
@@ -53,7 +62,7 @@ Most importantly, metrics should be compared by an agent across runs, not by hum
 | Automation is useful but accidental training starts are expensive | `submit-taiji.mjs` is dry-run by default; live creation requires `--execute --yes`, and start requires `--run`. |
 | Tool artifacts clutter the repository root | All local artifacts default to `taiji-output/`, including browser profile, scrape output, bundles, live results, and config diffs. |
 
-## What Codex Can Do With It
+## What Agents Can Do With It
 
 - Scrape recent training jobs and turn platform metrics into analyzable tables.
 - Answer "where is this run better or worse than the previous version?"
@@ -87,26 +96,26 @@ taiji-output/secrets/taiji-cookie.txt
 Scrape all training jobs:
 
 ```bash
-node scripts/scrape-taiji.mjs --all --cookie-file taiji-output/secrets/taiji-cookie.txt --headless
+taac2026 scrape --all --cookie-file taiji-output/secrets/taiji-cookie.txt --headless
 ```
 
 Incremental sync still scans the full Job list, but skips detail, code, instance, metric, and log fetches for cached terminal Jobs whose `updateTime/status/jzStatus` are unchanged:
 
 ```bash
-node scripts/scrape-taiji.mjs --all --incremental --cookie-file taiji-output/secrets/taiji-cookie.txt --direct
+taac2026 scrape --all --incremental --cookie-file taiji-output/secrets/taiji-cookie.txt --direct
 ```
 
 Use direct backend mode when Chromium is unreliable on a server:
 
 ```bash
-node scripts/scrape-taiji.mjs --all --cookie-file taiji-output/secrets/taiji-cookie.txt --direct
+taac2026 scrape --all --cookie-file taiji-output/secrets/taiji-cookie.txt --direct
 ```
 
 Compare two configs:
 
 ```bash
-node scripts/compare-config-yaml.mjs old-config.yaml new-config.yaml
-node scripts/compare-config-yaml.mjs old-config.yaml new-config.yaml --json --out diff.json
+taac2026 diff-config old-config.yaml new-config.yaml
+taac2026 diff-config old-config.yaml new-config.yaml --json --out diff.json
 ```
 
 `--out diff.json` writes to `taiji-output/config-diffs/diff.json`, not the repository root.
@@ -143,7 +152,7 @@ Your agent can follow this shape: package project code into `code.zip`, write ex
 For templates that use loose files such as `main.py + dataset.py + run.sh` instead of a pure zip shape, use generic file adaptation:
 
 ```bash
-node scripts/prepare-taiji-submit.mjs \
+taac2026 prepare-submit \
   --template-job-url "https://taiji.algo.qq.com/training/..." \
   --file-dir "./taiji-files" \
   --name "loose_files_exp"
@@ -167,7 +176,7 @@ This prepares a `run.sh` overwrite plus generic replacements for `dataset.py/mod
 You can also list files one by one:
 
 ```bash
-node scripts/prepare-taiji-submit.mjs \
+taac2026 prepare-submit \
   --template-job-url "https://taiji.algo.qq.com/training/..." \
   --zip "./submits/0505/V1.4.0/code.zip" \
   --config "./submits/0505/V1.4.0/config.yaml" \
@@ -182,7 +191,7 @@ node scripts/prepare-taiji-submit.mjs \
 Prepare a submit bundle:
 
 ```bash
-node scripts/prepare-taiji-submit.mjs \
+taac2026 prepare-submit \
   --template-job-url "https://taiji.algo.qq.com/training/..." \
   --zip "./submits/0505/V1.4.0/code.zip" \
   --config "./submits/0505/V1.4.0/config.yaml" \
@@ -209,7 +218,7 @@ taiji-output/submit-bundle/
 Generate a dry-run submit plan:
 
 ```bash
-node scripts/submit-taiji.mjs \
+taac2026 submit \
   --bundle taiji-output/submit-bundle \
   --cookie-file taiji-output/secrets/taiji-cookie.txt \
   --template-job-internal-id <TEMPLATE_JOB_INTERNAL_ID>
@@ -218,7 +227,7 @@ node scripts/submit-taiji.mjs \
 Upload and create a Job:
 
 ```bash
-node scripts/submit-taiji.mjs \
+taac2026 submit \
   --bundle taiji-output/submit-bundle \
   --cookie-file taiji-output/secrets/taiji-cookie.txt \
   --template-job-internal-id <TEMPLATE_JOB_INTERNAL_ID> \
@@ -228,7 +237,7 @@ node scripts/submit-taiji.mjs \
 Upload, create, and start training:
 
 ```bash
-node scripts/submit-taiji.mjs \
+taac2026 submit \
   --bundle taiji-output/submit-bundle \
   --cookie-file taiji-output/secrets/taiji-cookie.txt \
   --template-job-internal-id <TEMPLATE_JOB_INTERNAL_ID> \
@@ -240,7 +249,7 @@ Only add `--run` when the user explicitly asks to start training. For upload val
 If the template Job does not contain matching `code.zip`, `config.yaml`, matching `run.sh` when `--run-sh` is provided, or matching generic trainFiles when `--file` / `--file-dir` is provided, the script fails by default so old and new files do not coexist silently. Add this only when you intentionally want to add trainFiles:
 
 ```bash
-node scripts/submit-taiji.mjs ... --execute --yes --allow-add-file
+taac2026 submit ... --execute --yes --allow-add-file
 ```
 
 ## Safety Defaults
@@ -296,6 +305,7 @@ Poor fits:
 
 | Script | Purpose |
 | --- | --- |
+| `bin/taac2026.mjs` / `taac2026` | Unified CLI entrypoint that dispatches to the subcommands below |
 | `scripts/scrape-taiji.mjs` | Scrape Jobs, instances, metrics, logs, checkpoints, and code files |
 | `scripts/compare-config-yaml.mjs` | Semantically compare two YAML configs |
 | `scripts/prepare-taiji-submit.mjs` | Prepare a local submit bundle and record Git state |

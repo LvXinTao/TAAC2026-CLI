@@ -1,15 +1,15 @@
 ---
-name: taiji-metrics-scraper
-description: Scrape Tencent TAAC / Taiji training pages for Job IDs, Job Names, Job Descriptions, all training code files, instances, checkpoints, logs, and all Metrics; compare YAML configs such as config.yaml across versions; prepare TAAC experiment submissions; and optionally upload/start Taiji jobs through the captured API flow. Use when the user asks to crawl taiji.algo.qq.com/training, TAAC training jobs, Tencent Angel Machine Learning Platform outputs, ckpt pages, pod logs, config.yaml or arbitrary job code files, compare two config.yaml files, tf_events metrics, or wants a reusable backend/script workflow for TAAC metrics, logs, code files, config diffs, or code/config submission to Taiji.
+name: taac2026-cli
+description: Use TAAC2026 CLI to scrape Tencent TAAC / Taiji training pages for Job IDs, Job Names, Job Descriptions, code files, instances, checkpoints, logs, and metrics; compare YAML configs such as config.yaml across versions; prepare TAAC experiment submissions; and optionally upload/start Taiji jobs through the captured API flow. Use when a human or agent asks to crawl taiji.algo.qq.com/training, TAAC training jobs, Tencent Angel Machine Learning Platform outputs, ckpt pages, pod logs, config.yaml or arbitrary job code files, compare two config.yaml files, tf_events metrics, or wants a reusable CLI workflow for TAAC metrics, logs, code files, config diffs, or code/config submission to Taiji.
 ---
 
-# TAAC Metrics Scraper
+# TAAC2026 CLI Agent Runbook
 
 ## Workflow
 
 1. Confirm the target is `https://taiji.algo.qq.com/training` or a `/training/ckpt/.../<instanceId>` page.
-2. Run bundled scripts from the user's workspace root so `taiji-output/` is written there. Replace `<SKILL_DIR>` below with this skill directory, for example `.codex/skills/taiji-metrics-scraper` in a vendored repo install.
-3. If creating a standalone scraper workspace instead, copy the relevant scripts and create a minimal `package.json` using `references/package-json.md`.
+2. Run the CLI from the user's workspace root so `taiji-output/` is written there. If `npm link` was run, use `taac2026`; otherwise replace `<TOOL_DIR>` with this tool directory and use `node <TOOL_DIR>/bin/taac2026.mjs`.
+3. If creating a standalone workspace instead, clone `https://github.com/ZhongKuang/TAAC2026-CLI.git` or copy the relevant scripts and create a minimal `package.json` using `references/package-json.md`.
 4. Install dependencies with `npm install` and, if needed, `npx playwright install chromium`.
 5. Add `taiji-output/` to `.gitignore`. Scripts default all local outputs, browser profile, submit bundles, and live submit records under this directory.
 6. Capture a browser Cookie from the user if Playwright login triggers verification or rate limiting.
@@ -19,39 +19,39 @@ description: Scrape Tencent TAAC / Taiji training pages for Job IDs, Job Names, 
 
 For all training jobs:
 
-```powershell
-node <SKILL_DIR>/scripts/scrape-taiji.mjs --all --cookie-file taiji-output/secrets/taiji-cookie.txt --headless
+```bash
+taac2026 scrape --all --cookie-file taiji-output/secrets/taiji-cookie.txt --headless
 ```
 
 Incremental sync still scans the full Job list, but skips deep fetching for cached terminal Jobs whose `updateTime`, `status`, and `jzStatus` are unchanged:
 
-```powershell
-node <SKILL_DIR>/scripts/scrape-taiji.mjs --all --incremental --cookie-file taiji-output/secrets/taiji-cookie.txt --direct
+```bash
+taac2026 scrape --all --incremental --cookie-file taiji-output/secrets/taiji-cookie.txt --direct
 ```
 
 For servers where Chromium page fetch fails, use backend direct HTTP mode:
 
-```powershell
-node <SKILL_DIR>/scripts/scrape-taiji.mjs --all --cookie-file taiji-output/secrets/taiji-cookie.txt --direct
+```bash
+taac2026 scrape --all --cookie-file taiji-output/secrets/taiji-cookie.txt --direct
 ```
 
 For a single ckpt page:
 
-```powershell
-node <SKILL_DIR>/scripts/scrape-taiji.mjs --url "<TAAC_CKPT_URL>" --cookie-file taiji-output/secrets/taiji-cookie.txt --headless
+```bash
+taac2026 scrape --url "<TAAC_CKPT_URL>" --cookie-file taiji-output/secrets/taiji-cookie.txt --headless
 ```
 
 Compare two YAML config files:
 
-```powershell
-node <SKILL_DIR>/scripts/compare-config-yaml.mjs old-config.yaml new-config.yaml
-node <SKILL_DIR>/scripts/compare-config-yaml.mjs old-config.yaml new-config.yaml --json --out diff.json
+```bash
+taac2026 diff-config old-config.yaml new-config.yaml
+taac2026 diff-config old-config.yaml new-config.yaml --json --out diff.json
 ```
 
 Prepare a local-agent experiment submission package:
 
-```powershell
-node <SKILL_DIR>/scripts/prepare-taiji-submit.mjs --template-job-url "<TEMPLATE_JOB_URL>" --zip ".\artifacts\exp.zip" --config ".\configs\exp.yaml" --name "exp_017" --description "try focal loss"
+```bash
+taac2026 prepare-submit --template-job-url "<TEMPLATE_JOB_URL>" --zip "./artifacts/exp.zip" --config "./configs/exp.yaml" --name "exp_017" --description "try focal loss"
 ```
 
 Submit file priority:
@@ -65,28 +65,28 @@ The names `code.zip`, `config.yaml`, and `run.sh` are reserved primary names and
 
 Dry-run live submit plan:
 
-```powershell
-node <SKILL_DIR>/scripts/submit-taiji.mjs --bundle taiji-output/submit-bundle --cookie-file taiji-output/secrets/taiji-cookie.txt --template-job-internal-id <TEMPLATE_JOB_INTERNAL_ID>
+```bash
+taac2026 submit --bundle taiji-output/submit-bundle --cookie-file taiji-output/secrets/taiji-cookie.txt --template-job-internal-id <TEMPLATE_JOB_INTERNAL_ID>
 ```
 
 Live upload/create only. Do not add `--run` unless the user explicitly asks to start training:
 
-```powershell
-node <SKILL_DIR>/scripts/submit-taiji.mjs --bundle taiji-output/submit-bundle --cookie-file taiji-output/secrets/taiji-cookie.txt --template-job-internal-id <TEMPLATE_JOB_INTERNAL_ID> --execute --yes
+```bash
+taac2026 submit --bundle taiji-output/submit-bundle --cookie-file taiji-output/secrets/taiji-cookie.txt --template-job-internal-id <TEMPLATE_JOB_INTERNAL_ID> --execute --yes
 ```
 
 Live upload/create/run, only after explicit user confirmation:
 
-```powershell
-node <SKILL_DIR>/scripts/submit-taiji.mjs --bundle taiji-output/submit-bundle --cookie-file taiji-output/secrets/taiji-cookie.txt --template-job-internal-id <TEMPLATE_JOB_INTERNAL_ID> --execute --yes --run
+```bash
+taac2026 submit --bundle taiji-output/submit-bundle --cookie-file taiji-output/secrets/taiji-cookie.txt --template-job-internal-id <TEMPLATE_JOB_INTERNAL_ID> --execute --yes --run
 ```
 
 If the template Job does not already contain `code.zip`, `config.yaml`, requested `run.sh`, or requested generic `--file` / `--file-dir` names, `submit-taiji.mjs` fails by default. Use `--allow-add-file` only when intentionally adding new `trainFiles`.
 
 Use longer auth waiting only when interactive login is required:
 
-```powershell
-node <SKILL_DIR>/scripts/scrape-taiji.mjs --all --auth-timeout 600000
+```bash
+taac2026 scrape --all --auth-timeout 600000
 ```
 
 ## Cookie Handling

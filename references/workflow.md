@@ -55,11 +55,11 @@ Use `jobId + instanceId + metric + series + step` as the stable row identity for
 
 ## Config Diff
 
-Use `scripts/compare-config-yaml.mjs` for comparing two downloaded configs:
+Use `taac2026 diff-config` or `scripts/compare-config-yaml.mjs` for comparing two downloaded configs:
 
 ```bash
-node compare-config-yaml.mjs old-config.yaml new-config.yaml
-node compare-config-yaml.mjs old-config.yaml new-config.yaml --json --out diff.json
+taac2026 diff-config old-config.yaml new-config.yaml
+taac2026 diff-config old-config.yaml new-config.yaml --json --out diff.json
 ```
 
 The tool parses YAML and reports semantic changes by path. It handles nested maps and arrays, including paths like `optimizer.lr`, `features[2]`, and `model.layers[1].dropout`. Relative `--out` values are written under `taiji-output/`; a bare filename such as `diff.json` becomes `taiji-output/config-diffs/diff.json`.

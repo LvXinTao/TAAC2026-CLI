@@ -20,7 +20,7 @@ function parseArgs(argv) {
   }
 
   if (files.length !== 2) {
-    throw new Error("Usage: node compare-config-yaml.mjs <old-config.yaml> <new-config.yaml> [--json] [--out diff.json]. Relative --out paths are written under taiji-output/.");
+    throw new Error("Usage: taac2026 diff-config <old-config.yaml> <new-config.yaml> [--json] [--out diff.json]. Relative --out paths are written under taiji-output/.");
   }
 
   return { ...args, oldFile: files[0], newFile: files[1] };

@@ -17,6 +17,7 @@ const TAIJI_ORIGIN = "https://taiji.algo.qq.com";
 
 function usage() {
   return `Usage:
+  taac2026 submit --bundle <submit-bundle-dir> --cookie-file <cookie-file> --template-job-internal-id <id> [options]
   node scripts/submit-taiji.mjs --bundle <submit-bundle-dir> --cookie-file <cookie-file> --template-job-internal-id <id> [options]
 
 Options:

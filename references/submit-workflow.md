@@ -1,37 +1,36 @@
 # Taiji Submit Workflow
 
-This note captures the local-agent submission idea discussed in session
-`019df75c-87e1-72f3-adf8-293a9a38d3f5`.
+This note captures the TAAC2026 CLI submission workflow for agents and humans.
 
 ## Goal
 
-Let a local agent take a code change from the workspace, prepare the Taiji
+Let an agent take a code change from the workspace, prepare the Taiji
 training assets, submit them to the platform, start training, and return the
 new Job ID / instance ID, similar to a code commit workflow.
 
 Target command shape:
 
-```powershell
-node scripts/prepare-taiji-submit.mjs `
-  --template-job-url "https://taiji.algo.qq.com/training/..." `
-  --zip ".\artifacts\exp_017.zip" `
-  --config ".\configs\exp_017.yaml" `
-  --run-sh ".\run.sh" `
-  --file-dir ".\taiji-files" `
-  --file ".\main.py" `
-  --file ".\local_dataset.py=dataset.py" `
-  --name "exp_017_focal" `
-  --description "try focal loss" `
+```bash
+taac2026 prepare-submit \
+  --template-job-url "https://taiji.algo.qq.com/training/..." \
+  --zip "./artifacts/exp_017.zip" \
+  --config "./configs/exp_017.yaml" \
+  --run-sh "./run.sh" \
+  --file-dir "./taiji-files" \
+  --file "./main.py" \
+  --file "./local_dataset.py=dataset.py" \
+  --name "exp_017_focal" \
+  --description "try focal loss" \
   --run
 ```
 
 Higher-level wrappers can combine this with Git:
 
-```powershell
+```bash
 git add .
 git commit -m "try focal loss"
-node scripts/prepare-taiji-submit.mjs --template-job-url "<url>" --file-dir ".\taiji-files" --name "exp_017" --description "try focal loss" --run
-node scripts/submit-taiji.mjs --bundle taiji-output/submit-bundle --cookie-file taiji-output/secrets/taiji-cookie.txt --template-job-internal-id <TEMPLATE_JOB_INTERNAL_ID> --execute --yes
+taac2026 prepare-submit --template-job-url "<url>" --file-dir "./taiji-files" --name "exp_017" --description "try focal loss" --run
+taac2026 submit --bundle taiji-output/submit-bundle --cookie-file taiji-output/secrets/taiji-cookie.txt --template-job-internal-id <TEMPLATE_JOB_INTERNAL_ID> --execute --yes
 ```
 
 Add `--run` to the submit command only when the user explicitly asks to start training.
@@ -112,5 +111,5 @@ them under `taiji-output/`.
 - Records Git root, branch, HEAD, and dirty status when available.
 - Writes `manifest.json` and `NEXT_STEPS.md`.
 
-This gives a local agent a consistent handoff point. `submit-taiji.mjs` consumes
+This gives an agent a consistent handoff point. `submit-taiji.mjs` consumes
 that bundle when the user explicitly asks for live upload/run.

@@ -15,7 +15,7 @@ import { replaceTrainFiles } from "../submit-taiji.mjs";
 
 const execFileAsync = promisify(execFile);
 const scriptsDir = fileURLToPath(new URL("..", import.meta.url));
-const skillDir = fileURLToPath(new URL("../..", import.meta.url));
+const toolDir = fileURLToPath(new URL("../..", import.meta.url));
 
 test("submit replaces only template trainFiles with matching names by default", () => {
   const next = replaceTrainFiles(
@@ -114,7 +114,7 @@ test("prepare and dry-run submit include optional run.sh replacement", async () 
     "--out",
     bundle,
     "--allow-dirty",
-  ], { cwd: skillDir });
+  ], { cwd: toolDir });
 
   const manifest = JSON.parse(await readFile(path.join(bundle, "manifest.json"), "utf8"));
   assert.equal(manifest.files.runSh.basename, "run.sh");
@@ -131,7 +131,7 @@ test("prepare and dry-run submit include optional run.sh replacement", async () 
     "58620",
     "--out",
     submitOut,
-  ], { cwd: skillDir });
+  ], { cwd: toolDir });
 
   const plan = JSON.parse(await readFile(path.join(submitOut, "plan.json"), "utf8"));
   assert.equal(plan.files.runSh.basename, "run.sh");
@@ -168,7 +168,7 @@ test("prepare and dry-run submit include generic trainFiles after primary files"
     "--out",
     bundle,
     "--allow-dirty",
-  ], { cwd: skillDir });
+  ], { cwd: toolDir });
 
   const manifest = JSON.parse(await readFile(path.join(bundle, "manifest.json"), "utf8"));
   assert.deepEqual(manifest.files.genericFiles.map((file) => file.name), ["main.py", "dataset.py"]);
@@ -183,7 +183,7 @@ test("prepare and dry-run submit include generic trainFiles after primary files"
     "58620",
     "--out",
     submitOut,
-  ], { cwd: skillDir });
+  ], { cwd: toolDir });
 
   const plan = JSON.parse(await readFile(path.join(submitOut, "plan.json"), "utf8"));
   assert.deepEqual(plan.files.genericFiles.map((file) => file.name), ["main.py", "dataset.py"]);
@@ -216,7 +216,7 @@ test("generic trainFiles cannot use primary trainFile names", async () => {
       "--out",
       bundle,
       "--allow-dirty",
-    ], { cwd: skillDir }),
+    ], { cwd: toolDir }),
     /reserved primary trainFile name: config\.yaml/,
   );
 });
@@ -247,7 +247,7 @@ test("file-dir maps primary trainFiles and generic files automatically", async (
     "--out",
     bundle,
     "--allow-dirty",
-  ], { cwd: skillDir });
+  ], { cwd: toolDir });
 
   const manifest = JSON.parse(await readFile(path.join(bundle, "manifest.json"), "utf8"));
   assert.equal(manifest.files.codeZip.basename, "code.zip");
@@ -263,7 +263,7 @@ test("file-dir maps primary trainFiles and generic files automatically", async (
     "58620",
     "--out",
     submitOut,
-  ], { cwd: skillDir });
+  ], { cwd: toolDir });
 
   const plan = JSON.parse(await readFile(path.join(submitOut, "plan.json"), "utf8"));
   assert.equal(plan.files.codeZip.basename, "code.zip");
@@ -294,7 +294,7 @@ test("file-dir supports loose trainFiles without code.zip or config.yaml", async
     "--out",
     bundle,
     "--allow-dirty",
-  ], { cwd: skillDir });
+  ], { cwd: toolDir });
 
   const manifest = JSON.parse(await readFile(path.join(bundle, "manifest.json"), "utf8"));
   assert.equal(manifest.files.codeZip, undefined);
@@ -310,7 +310,7 @@ test("file-dir supports loose trainFiles without code.zip or config.yaml", async
     "58620",
     "--out",
     submitOut,
-  ], { cwd: skillDir });
+  ], { cwd: toolDir });
 
   const plan = JSON.parse(await readFile(path.join(submitOut, "plan.json"), "utf8"));
   assert.equal(plan.files.codeZip, undefined);

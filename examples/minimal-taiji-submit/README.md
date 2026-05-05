@@ -51,7 +51,7 @@ cp examples/minimal-taiji-submit/config.yaml taiji-output/example-submit/config.
 Then prepare a submit bundle:
 
 ```bash
-node scripts/prepare-taiji-submit.mjs \
+taac2026 prepare-submit \
   --template-job-url "https://taiji.algo.qq.com/training/..." \
   --zip taiji-output/example-submit/code.zip \
   --config taiji-output/example-submit/config.yaml \
@@ -61,7 +61,7 @@ node scripts/prepare-taiji-submit.mjs \
 Optional entrypoint override:
 
 ```bash
-node scripts/prepare-taiji-submit.mjs \
+taac2026 prepare-submit \
   --template-job-url "https://taiji.algo.qq.com/training/..." \
   --zip taiji-output/example-submit/code.zip \
   --config taiji-output/example-submit/config.yaml \
@@ -76,7 +76,7 @@ which is the recommended default shape.
 For a loose-file template, put the direct trainFiles in one directory and use:
 
 ```bash
-node scripts/prepare-taiji-submit.mjs \
+taac2026 prepare-submit \
   --template-job-url "https://taiji.algo.qq.com/training/..." \
   --file-dir ./taiji-files \
   --name "loose_file_example"
@@ -88,7 +88,7 @@ files become generic trainFiles. Subdirectories are ignored.
 For one-off generic file mapping:
 
 ```bash
-node scripts/prepare-taiji-submit.mjs \
+taac2026 prepare-submit \
   --template-job-url "https://taiji.algo.qq.com/training/..." \
   --zip taiji-output/example-submit/code.zip \
   --config taiji-output/example-submit/config.yaml \

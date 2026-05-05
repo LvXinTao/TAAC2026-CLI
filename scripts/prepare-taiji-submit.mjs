@@ -11,6 +11,7 @@ const PRIMARY_TRAIN_FILE_NAMES = new Set(["code.zip", "config.yaml", "run.sh"]);
 
 function usage() {
   return `Usage:
+  taac2026 prepare-submit --template-job-url <url> --zip <code.zip> --config <config.yaml> --name <job-name> [options]
   node scripts/prepare-taiji-submit.mjs --template-job-url <url> --zip <code.zip> --config <config.yaml> --name <job-name> [options]
 
 Options:

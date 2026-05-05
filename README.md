@@ -1,34 +1,43 @@
-# Taiji Metrics Scraper Skill
+# TAAC2026 CLI
 
 [English](README.en.md)
 
-把 Taiji / TAAC 训练平台变成 agent 能读取、能比较、能归档、能提交训练的实验工作台。
+把 Taiji / TAAC 训练平台变成任何人和任何 agent 都能读取、比较、归档、提交训练的实验命令行工具。
 
-这个 skill 面向 `https://taiji.algo.qq.com/training`：它可以抓取训练任务、指标、日志、checkpoint、代码文件，比较两个 `config.yaml` 的语义差异，并通过已捕获的 Taiji API 流程准备、上传、创建和启动训练任务。所有本地产物默认收进 `taiji-output/`，不会把根目录弄得一团乱。
+TAAC2026 CLI 面向 `https://taiji.algo.qq.com/training`：它可以抓取训练任务、指标、日志、checkpoint、代码文件，比较两个 `config.yaml` 的语义差异，并通过已捕获的 Taiji API 流程准备、上传、创建和启动训练任务。所有本地产物默认收进 `taiji-output/`，不会把根目录弄得一团乱。
+
+`SKILL.md` 是通用 agent 操作手册：Codex、Claude Code、OpenAI Agents SDK、Cursor、Aider，或者任何能读仓库文件并运行 shell 的 agent，都可以按它来使用本 CLI。
 
 ## 给 Agent 一键安装
 
-直接把这段话发给 Codex / 兼容 Codex skill 的 agent：
+直接把这段话发给你的 agent：
 
 ```text
-请安装并使用这个 Codex skill：
-https://github.com/ZhongKuang/taiji-metrics-scraper-skill.git
+请安装并使用这个通用 agent CLI：
+https://github.com/ZhongKuang/TAAC2026-CLI.git
 
-安装后请运行 npm install，并在需要浏览器模式时安装 Chromium：
+安装后请运行 npm install。需要全局 CLI 时运行 npm link。
+需要浏览器模式时再安装 Chromium：
 npx playwright install chromium
 ```
 
 手动安装：
 
 ```bash
-mkdir -p ~/.codex/skills
-git clone https://github.com/ZhongKuang/taiji-metrics-scraper-skill.git ~/.codex/skills/taiji-metrics-scraper
-cd ~/.codex/skills/taiji-metrics-scraper
+git clone https://github.com/ZhongKuang/TAAC2026-CLI.git
+cd TAAC2026-CLI
 npm install
+npm link
 npx playwright install chromium
 ```
 
-如果当前仓库已经内置了本 skill，可以直接进入 `.codex/skills/taiji-metrics-scraper/` 后运行 `npm install`。
+之后可以直接运行：
+
+```bash
+taac2026 --help
+```
+
+如果当前仓库已经内置了本工具，可以直接进入 `.codex/skills/taiji-metrics-scraper/` 后运行 `npm install`，或从仓库根目录用 `node .codex/skills/taiji-metrics-scraper/bin/taac2026.mjs ...`。
 
 ## 痛点：训练平台不该占用你的工作记忆
 
@@ -38,11 +47,11 @@ npx playwright install chromium
 
 更糟的是提交训练本身也容易出错。好不容易写了一版不错的代码，上传时却可能传错 zip、忘了换 config、只改了标题没改超参数，白白跑几个 epoch 才发现。于是每次提交都变成一场小心翼翼的人工仪式。
 
-最关键的是，训练产出的 metric 明明应该交给 agent 跨实例分析，却常常只能靠人脑短时记忆做比较。这个 skill 的目的就是把这些“页面劳动”变成可归档、可比较、可自动化的实验数据流。
+最关键的是，训练产出的 metric 明明应该交给 agent 跨实例分析，却常常只能靠人脑短时记忆做比较。TAAC2026 CLI 的目的就是把这些“页面劳动”变成可归档、可比较、可自动化的实验数据流。
 
 ## 我们能解决什么
 
-| 痛点 | 这个 skill 怎么解决 |
+| 痛点 | TAAC2026 CLI 怎么解决 |
 | --- | --- |
 | 每天手动点开多个实例看曲线 | 批量抓取 Job、实例、checkpoint 和 metrics，输出 `jobs.json`、`all-metrics-long.csv`、`all-checkpoints.csv`。 |
 | metric 多了以后只能靠鼠标滑动和人脑记忆对比 | 把指标转成长表，保留 `jobId + instanceId + metric + step`，让 agent 可以一次性跨 Job / Run 做排序、对比和总结。 |
@@ -53,7 +62,7 @@ npx playwright install chromium
 | 想自动提交但又怕误启动训练 | `submit-taiji.mjs` 默认 dry-run；真实创建必须显式 `--execute --yes`，启动必须额外 `--run`。 |
 | 工具产物散落根目录，越用越乱 | 所有本地产物默认写入 `taiji-output/`，包括浏览器 profile、抓取结果、提交包、dry-run/live 结果和 config diff。 |
 
-## 它让 Codex 可以做什么
+## 它让 Agent 可以做什么
 
 - 一键抓取最近所有训练，把实验指标整理成可分析表格。
 - 帮你回答“这一版到底比上一版强在哪里，弱在哪里”。
@@ -87,26 +96,26 @@ taiji-output/secrets/taiji-cookie.txt
 抓取全部训练任务：
 
 ```bash
-node scripts/scrape-taiji.mjs --all --cookie-file taiji-output/secrets/taiji-cookie.txt --headless
+taac2026 scrape --all --cookie-file taiji-output/secrets/taiji-cookie.txt --headless
 ```
 
 增量同步会完整扫描 Job list，但对本地已有、终态、且 `updateTime/status/jzStatus` 没变的 Job 跳过 detail、代码、实例、metric 和 log 的深拉：
 
 ```bash
-node scripts/scrape-taiji.mjs --all --incremental --cookie-file taiji-output/secrets/taiji-cookie.txt --direct
+taac2026 scrape --all --incremental --cookie-file taiji-output/secrets/taiji-cookie.txt --direct
 ```
 
 服务器上 Chromium 不稳定时，用后端直连模式：
 
 ```bash
-node scripts/scrape-taiji.mjs --all --cookie-file taiji-output/secrets/taiji-cookie.txt --direct
+taac2026 scrape --all --cookie-file taiji-output/secrets/taiji-cookie.txt --direct
 ```
 
 比较两个配置：
 
 ```bash
-node scripts/compare-config-yaml.mjs old-config.yaml new-config.yaml
-node scripts/compare-config-yaml.mjs old-config.yaml new-config.yaml --json --out diff.json
+taac2026 diff-config old-config.yaml new-config.yaml
+taac2026 diff-config old-config.yaml new-config.yaml --json --out diff.json
 ```
 
 `--out diff.json` 会写到 `taiji-output/config-diffs/diff.json`，不会掉到根目录。
@@ -143,7 +152,7 @@ examples/minimal-taiji-submit/
 如果别人的模板不是 zip 形态，而是散文件，例如 `main.py + dataset.py + run.sh`，也可以用通用文件适配：
 
 ```bash
-node scripts/prepare-taiji-submit.mjs \
+taac2026 prepare-submit \
   --template-job-url "https://taiji.algo.qq.com/training/..." \
   --file-dir "./taiji-files" \
   --name "loose_files_exp"
@@ -167,7 +176,7 @@ taiji-files/
 也可以单独列文件：
 
 ```bash
-node scripts/prepare-taiji-submit.mjs \
+taac2026 prepare-submit \
   --template-job-url "https://taiji.algo.qq.com/training/..." \
   --zip "./submits/0505/V1.4.0/code.zip" \
   --config "./submits/0505/V1.4.0/config.yaml" \
@@ -182,7 +191,7 @@ node scripts/prepare-taiji-submit.mjs \
 准备一个提交包：
 
 ```bash
-node scripts/prepare-taiji-submit.mjs \
+taac2026 prepare-submit \
   --template-job-url "https://taiji.algo.qq.com/training/..." \
   --zip "./submits/0505/V1.4.0/code.zip" \
   --config "./submits/0505/V1.4.0/config.yaml" \
@@ -209,7 +218,7 @@ taiji-output/submit-bundle/
 生成 dry-run 提交计划：
 
 ```bash
-node scripts/submit-taiji.mjs \
+taac2026 submit \
   --bundle taiji-output/submit-bundle \
   --cookie-file taiji-output/secrets/taiji-cookie.txt \
   --template-job-internal-id <TEMPLATE_JOB_INTERNAL_ID>
@@ -218,7 +227,7 @@ node scripts/submit-taiji.mjs \
 真实上传并创建 Job：
 
 ```bash
-node scripts/submit-taiji.mjs \
+taac2026 submit \
   --bundle taiji-output/submit-bundle \
   --cookie-file taiji-output/secrets/taiji-cookie.txt \
   --template-job-internal-id <TEMPLATE_JOB_INTERNAL_ID> \
@@ -228,7 +237,7 @@ node scripts/submit-taiji.mjs \
 上传、创建并启动训练：
 
 ```bash
-node scripts/submit-taiji.mjs \
+taac2026 submit \
   --bundle taiji-output/submit-bundle \
   --cookie-file taiji-output/secrets/taiji-cookie.txt \
   --template-job-internal-id <TEMPLATE_JOB_INTERNAL_ID> \
@@ -240,7 +249,7 @@ node scripts/submit-taiji.mjs \
 如果模板 Job 里没有同名 `code.zip`、`config.yaml`，或在传入 `--run-sh` / `--file` / `--file-dir` 时没有对应同名 trainFile，脚本会默认报错，避免旧文件和新文件同时存在。只有明确要新增 trainFiles 时才加：
 
 ```bash
-node scripts/submit-taiji.mjs ... --execute --yes --allow-add-file
+taac2026 submit ... --execute --yes --allow-add-file
 ```
 
 ## 安全默认值
@@ -296,6 +305,7 @@ taiji-output/
 
 | 脚本 | 用途 |
 | --- | --- |
+| `bin/taac2026.mjs` / `taac2026` | 统一 CLI 入口，分发到下列子命令 |
 | `scripts/scrape-taiji.mjs` | 抓取 Job、实例、指标、日志、checkpoint、代码文件 |
 | `scripts/compare-config-yaml.mjs` | 语义比较两个 YAML 配置 |
 | `scripts/prepare-taiji-submit.mjs` | 准备本地提交包，记录 Git 状态和上传文件 |

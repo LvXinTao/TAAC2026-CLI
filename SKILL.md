@@ -1,6 +1,6 @@
 ---
 name: taiji-metrics-scraper
-description: Scrape Tencent TAAC / Taiji training pages for Job IDs, Job Names, Job Descriptions, all training code files, instances, checkpoints, logs, and all Metrics, and compare YAML configs such as config.yaml across versions. Use when the user asks to crawl taiji.algo.qq.com/training, TAAC training jobs, Tencent Angel Machine Learning Platform outputs, ckpt pages, pod logs, config.yaml or arbitrary job code files, compare two config.yaml files, tf_events metrics, or wants a reusable one-click backend script/export workflow for TAAC metrics, logs, code files, and config diffs.
+description: Scrape Tencent TAAC / Taiji training pages for Job IDs, Job Names, Job Descriptions, all training code files, instances, checkpoints, logs, and all Metrics; compare YAML configs such as config.yaml across versions; and prepare local-agent TAAC experiment submissions. Use when the user asks to crawl taiji.algo.qq.com/training, TAAC training jobs, Tencent Angel Machine Learning Platform outputs, ckpt pages, pod logs, config.yaml or arbitrary job code files, compare two config.yaml files, tf_events metrics, or wants a reusable one-click backend/script workflow for TAAC metrics, logs, code files, config diffs, or preparing code/config submission to Taiji.
 ---
 
 # TAAC Metrics Scraper
@@ -42,6 +42,12 @@ node compare-config-yaml.mjs old-config.yaml new-config.yaml
 node compare-config-yaml.mjs old-config.yaml new-config.yaml --json --out diff.json
 ```
 
+Prepare a local-agent experiment submission package:
+
+```powershell
+node prepare-taiji-submit.mjs --template-job-url "<TEMPLATE_JOB_URL>" --zip ".\artifacts\exp.zip" --config ".\configs\exp.yaml" --name "exp_017" --description "try focal loss" --run
+```
+
 Use longer auth waiting only when interactive login is required:
 
 ```powershell
@@ -76,6 +82,22 @@ Use `scripts/compare-config-yaml.mjs` to compare two YAML files semantically ins
 Use path identity like `model.lr`, `train.batch_size`, and `layers[1]` when explaining changes. Prefer `--json` when downstream scripts need machine-readable output.
 
 Use `jobId + instanceId` to distinguish multiple runs under one Job ID. Use `jobId + instanceId + metric + series + step` for metric row identity.
+
+## Submit Training Workflow
+
+Use `scripts/prepare-taiji-submit.mjs` when a local agent needs to package the intended Taiji submission before a live upload/run workflow is calibrated. It validates the code zip and config file, records the Git commit/status when available, writes a manifest, and captures whether the agent should run after submission.
+
+The intended live workflow is:
+
+1. Commit or record the local code state.
+2. Reuse a known-good template Job instead of creating a blank Job.
+3. Copy the template Job.
+4. Replace the code zip and config file; keep `run.sh` unchanged unless explicitly required.
+5. Fill Job Name and Job Description.
+6. Submit the new Job.
+7. Optionally click Run and return the new Job ID, Job URL, and instance result.
+
+Do not enable live browser/API submission until at least one successful manual "Copy Job -> upload zip/config -> submit -> run" flow has been captured from DevTools. The unresolved pieces are the file upload endpoint/payload and stable UI selectors. Load `references/submit-workflow.md` before implementing or debugging live submission.
 
 ## Implementation Notes
 

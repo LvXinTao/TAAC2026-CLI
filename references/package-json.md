@@ -12,7 +12,8 @@ Use this package file when creating a standalone workspace scraper.
     "scrape:all": "node scrape-taiji.mjs --all",
     "scrape": "node scrape-taiji.mjs",
     "diff:config": "node compare-config-yaml.mjs",
-    "check": "node --check scrape-taiji.mjs"
+    "prepare:submit": "node prepare-taiji-submit.mjs",
+    "check": "node --check scrape-taiji.mjs && node --check compare-config-yaml.mjs && node --check prepare-taiji-submit.mjs"
   },
   "dependencies": {
     "js-yaml": "^4.1.0",

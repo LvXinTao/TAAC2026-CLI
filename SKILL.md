@@ -17,6 +17,14 @@ description: Use TAAC2026 CLI to scrape Tencent TAAC / Taiji training pages for 
 
 ## Commands
 
+Recommended scrape strategy:
+
+1. Fresh workspace or missing `taiji-output/jobs.json`: run one full `scrape --all` to seed the local cache.
+2. Existing cache and no narrow target: prefer `scrape --all --incremental`; it still refreshes the Job list, but skips deep fetching unchanged cached terminal Jobs.
+3. User gives explicit Job IDs, experiment names, or a small set such as "1.4.8, 1.4.9, +1/+2/+3": prefer targeted scrape first with `--job-internal-id <id>` for each known Job. If the IDs are unknown, use `jobs-summary.csv` or `taac2026 compare jobs` / shell filtering to identify candidates before scraping the historical task sea.
+4. During targeted scrape, the platform may not print continuous progress while fetching instances, logs, metrics, checkpoints, or code files. Wait for the command to finish instead of starting a full historical scrape in parallel.
+5. After targeted scrape, summarize only the requested Jobs unless the user explicitly asks for a broader historical comparison.
+
 For all training jobs:
 
 ```bash

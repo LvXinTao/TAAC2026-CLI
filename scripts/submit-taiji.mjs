@@ -102,7 +102,7 @@ function taijiHeaders(cookieHeader) {
     accept: "application/json, text/plain, */*",
     "content-type": "application/json",
     cookie: cookieHeader,
-    referer: `${TAIJI_ORIGIN}/training`,
+    referer: `${TAIJI_ORIGIN}/training/create`,
     "user-agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147 Safari/537.36",
   };
 }
@@ -153,7 +153,7 @@ function formatTaijiTime(date = new Date()) {
 
 function inferCosPrefix(templateData) {
   for (const file of templateData.trainFiles || []) {
-    const match = String(file.path || "").match(/^(.*?\/ams_[^/]+)\/train\//);
+    const match = String(file.path || "").match(/^(.+?)\/(?:common\/)?(?:train|template)\//);
     if (match) return match[1];
   }
   throw new Error("Cannot infer COS prefix from template trainFiles");
@@ -299,17 +299,30 @@ async function main() {
   const templateData = template.data;
   if (!templateData?.trainFiles) throw new Error("Template detail response has no data.trainFiles");
   const cosPrefix = inferCosPrefix(templateData);
-  const codeKey = codeZip ? newCosKey(cosPrefix, zipMeta.basename) : null;
-  const configKey = config ? newCosKey(cosPrefix, configMeta.basename) : null;
+
+  // Extract account prefix (e.g. "ams_2026_1029731852466346144") from taskId
+  // taskId format: angel_training_ams_2026_1029731852466346144_20260506104134_f0b56af1
+  let accountPrefix = "";
+  const rawTaskId = String(templateData.taskId || "");
+  const parts = rawTaskId.split("_");
+  const amsIdx = parts.findIndex(p => p === "ams");
+  if (amsIdx >= 0 && amsIdx + 2 < parts.length) {
+    accountPrefix = parts.slice(amsIdx, amsIdx + 3).join("_"); // ams_2026_1029731852466346144
+  }
+
+  const fullCosPrefix = accountPrefix ? `${cosPrefix}/${accountPrefix}` : cosPrefix;
+
+  const codeKey = codeZip ? newCosKey(fullCosPrefix, zipMeta.basename) : null;
+  const configKey = config ? newCosKey(fullCosPrefix, configMeta.basename) : null;
   const uploadedTrainFiles = [
     ...(codeZip ? [{ name: "code.zip", path: codeKey, mtime: formatTaijiTime(), size: zipMeta.bytes }] : []),
     ...(config ? [{ name: "config.yaml", path: configKey, mtime: formatTaijiTime(), size: configMeta.bytes }] : []),
     ...(runSh
-      ? [{ name: "run.sh", path: newCosKey(cosPrefix, runShMeta.basename), mtime: formatTaijiTime(), size: runShMeta.bytes }]
+      ? [{ name: "run.sh", path: newCosKey(fullCosPrefix, runShMeta.basename), mtime: formatTaijiTime(), size: runShMeta.bytes }]
       : []),
     ...genericFileMetas.map((file) => ({
       name: file.name,
-      path: newCosKey(cosPrefix, file.name),
+      path: newCosKey(fullCosPrefix, file.name),
       mtime: formatTaijiTime(),
       size: file.bytes,
     })),

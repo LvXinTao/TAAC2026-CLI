@@ -8,6 +8,8 @@
     "taac2026": "./bin/taac2026.mjs"
   },
   "scripts": {
+    "build": "tsc",
+    "dev": "tsx src/cli/index.ts",
     "cli": "node bin/taac2026.mjs",
     "scrape": "node scripts/scrape-taiji.mjs",
     "scrape:all": "node scripts/scrape-taiji.mjs --all",
@@ -18,8 +20,15 @@
     "check": "node --check bin/taac2026.mjs && node --check scripts/scrape-taiji.mjs && node --check scripts/compare-config-yaml.mjs && node --check scripts/prepare-taiji-submit.mjs && node --check scripts/submit-taiji.mjs && node --check scripts/experiment-tools.mjs"
   },
   "dependencies": {
+    "commander": "^12.1.0",
     "js-yaml": "^4.1.0",
     "playwright": "^1.52.0",
     "cos-nodejs-sdk-v5": "^2.15.4"
+  },
+  "devDependencies": {
+    "@types/js-yaml": "^4.0.9",
+    "@types/node": "^22.0.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0"
   }
 }

@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { chromium, type BrowserContext, type Page } from "playwright";
-import { parseCookieEntries } from "./token";
+import { parseCookieEntries } from "./token.js";
 
 const TRAINING_URL = "https://taiji.algo.qq.com/training";
 

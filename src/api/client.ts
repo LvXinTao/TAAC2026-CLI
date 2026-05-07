@@ -1,5 +1,5 @@
-import type { DirectClient } from "../types";
-import { isDirectClient } from "../auth/token";
+import type { DirectClient } from "../types.js";
+import { isDirectClient } from "../auth/token.js";
 
 const TAIJI_ORIGIN = "https://taiji.algo.qq.com";
 const TRAINING_URL = "https://taiji.algo.qq.com/training";

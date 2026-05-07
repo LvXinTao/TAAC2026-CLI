@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
-import type { CookieEntry, DirectClient } from "../types";
+import type { CookieEntry, DirectClient } from "../types.js";
 
 export function extractCookieHeader(fileContent: string): string {
   const text = fileContent.trim();

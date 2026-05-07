@@ -1,7 +1,7 @@
 import path from "node:path";
 import { createRequire } from "node:module";
-import type { CosToken, TrainFile, DownloadValidation } from "../types";
-import { fetchJson } from "./client";
+import type { CosToken, TrainFile, DownloadValidation } from "../types.js";
+import { fetchJson } from "./client.js";
 
 const require = createRequire(import.meta.url);
 const COS = require("cos-nodejs-sdk-v5");

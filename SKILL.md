@@ -1,13 +1,13 @@
 ---
 name: taac2026-cli
-description: Use TAAC2026 CLI to scrape Tencent TAAC / Taiji training pages for Job IDs, Job Names, Job Descriptions, code files, instances, checkpoints, logs, and metrics; compare YAML configs such as config.yaml across versions; prepare TAAC experiment submissions; and optionally upload/start Taiji jobs through the captured API flow. Use when a human or agent asks to crawl taiji.algo.qq.com/training, TAAC training jobs, Tencent Angel Machine Learning Platform outputs, ckpt pages, pod logs, config.yaml or arbitrary job code files, compare two config.yaml files, tf_events metrics, or wants a reusable CLI workflow for TAAC metrics, logs, code files, config diffs, or code/config submission to Taiji.
+description: Use TAAC2026 CLI to scrape Tencent TAAC / Taiji training pages and evaluation tasks for Job IDs, Job Names, Job Descriptions, code files, instances, checkpoints, logs, metrics, and evaluation results; compare YAML configs such as config.yaml across versions; prepare TAAC experiment submissions; and optionally upload/start Taiji jobs through the captured API flow. Use when a human or agent asks to crawl taiji.algo.qq.com/training, taiji.algo.qq.com/evaluation, TAAC training jobs, Tencent Angel Machine Learning Platform outputs, evaluation task lists, event logs, ckpt pages, pod logs, config.yaml or arbitrary job code files, compare two config.yaml files, tf_events metrics, or wants a reusable CLI workflow for TAAC metrics, logs, code files, config diffs, or code/config submission to Taiji.
 ---
 
 # TAAC2026 CLI Agent Runbook
 
 ## Workflow
 
-1. Confirm the target is `https://taiji.algo.qq.com/training` or a `/training/ckpt/.../<instanceId>` page.
+1. Confirm the target is `https://taiji.algo.qq.com/training`, `https://taiji.algo.qq.com/evaluation`, or a `/training/ckpt/.../<instanceId>` page.
 2. Run the CLI from the user's workspace root so `taiji-output/` is written there. If `npm link` was run, use `taac2026`; otherwise replace `<TOOL_DIR>` with this tool directory and use `node <TOOL_DIR>/bin/taac2026.mjs`.
 3. If creating a standalone workspace instead, clone `https://github.com/ZhongKuang/TAAC2026-CLI.git` or copy the relevant scripts and create a minimal `package.json` using `references/package-json.md`.
 4. Install dependencies with `npm install` and, if needed, `npx playwright install chromium`.
@@ -53,6 +53,18 @@ For a single ckpt page:
 
 ```bash
 taac2026 scrape --url "<TAAC_CKPT_URL>" --cookie-file taiji-output/secrets/taiji-cookie.txt --headless
+```
+
+For all evaluation tasks:
+
+```bash
+taac2026 scrape --evaluation --cookie-file taiji-output/secrets/taiji-cookie.txt --headless
+```
+
+Evaluation tasks can also be scraped in direct HTTP mode:
+
+```bash
+taac2026 scrape --evaluation --cookie-file taiji-output/secrets/taiji-cookie.txt --direct
 ```
 
 Compare two YAML config files:
@@ -139,6 +151,9 @@ The scraper writes to `taiji-output/` by default:
 - `code/<jobId>/job-detail.json`: full Job detail response, including `trainFiles` when available.
 - `code/<jobId>/train-files.json`: train file metadata plus download status.
 - `code/<jobId>/files/...`: best-effort downloaded training code files, preserving path structure when possible.
+- `eval-tasks.json`: complete evaluation task data, keyed by `tasksById[taskId]`, with event log metadata.
+- `eval-tasks-summary.csv`: one row per evaluation task; fields include id, name, status, score, auc, infer_time, error_msg, log_entries.
+- `eval-logs/<task_id>.json` and `.txt`: event logs for every evaluation task.
 - `browser-profile/`: Playwright persistent browser state for interactive auth fallback.
 - `config-diffs/`: config diff files when `compare-config-yaml.mjs --out <file>` is used with a relative path.
 - `ledger/experiments.json`: structured experiment ledger from `ledger sync`.
@@ -200,6 +215,8 @@ Use `ckpt-select` only with an explicit rule such as `--by valid_auc`, `--by val
 - Validate downloaded trainFiles before saving: reject Taiji frontend HTML, size mismatches, bad zip magic for `.zip`, non-mapping `config.yaml`, and invalid JSON. Always save `job-detail.json` and `train-files.json` even when some file content downloads fail.
 - Some failed or interrupted instances legitimately have zero metrics.
 - `--direct` bypasses Chromium and uses Node `fetch` with the Cookie header. It helps on headless servers, but it cannot fix an expired, IP-bound, or fingerprint-bound login token.
+- The evaluation task list endpoint is GET `/aide/api/evaluation_tasks/`, paginated with `page` and `page_size` params; results are in `response.results`.
+- The evaluation event log endpoint is GET `/aide/api/evaluation_tasks/event_log/?task_id=<id>`; log entries are in `response.data.list`, each with `time`, `message`, and `reason` fields.
 - The output CSV can be large. Prefer streaming or long-form CSV for downstream analysis instead of loading the whole file into memory for ad hoc transformations.
 
 Load `references/workflow.md` when debugging endpoint behavior, auth, empty instances, or metric flattening.

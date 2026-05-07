@@ -4,7 +4,7 @@
 
 把 Taiji / TAAC 训练平台变成任何人和任何 agent 都能读取、比较、归档、提交训练的实验命令行工具。
 
-TAAC2026 CLI 面向 `https://taiji.algo.qq.com/training`：它可以抓取训练任务、指标、日志、checkpoint、代码文件，比较两个 `config.yaml` 的语义差异，并通过已捕获的 Taiji API 流程准备、上传、创建和启动训练任务。所有本地产物默认收进 `taiji-output/`，不会把根目录弄得一团乱。
+TAAC2026 CLI 面向 `https://taiji.algo.qq.com/training` 和 `https://taiji.algo.qq.com/evaluation`：它可以抓取训练任务、评测任务、指标、日志、checkpoint、代码文件，比较两个 `config.yaml` 的语义差异，并通过已捕获的 Taiji API 流程准备、上传、创建和启动训练任务。所有本地产物默认收进 `taiji-output/`，不会把根目录弄得一团乱。
 
 `SKILL.md` 是通用 agent 操作手册：Codex、Claude Code、OpenAI Agents SDK、Cursor、Aider，或者任何能读仓库文件并运行 shell 的 agent，都可以按它来使用本 CLI。
 
@@ -61,6 +61,7 @@ taac2026 --help
 | 上传训练容易传错 zip / config / run.sh / 标题和说明 | `prepare-taiji-submit.mjs` 先生成提交包和 manifest，记录 Job Name、Description、Git HEAD、dirty 状态和待上传文件。 |
 | 想自动提交但又怕误启动训练 | `submit-taiji.mjs` 默认 dry-run；真实创建必须显式 `--execute --yes`，启动必须额外 `--run`。 |
 | 工具产物散落根目录，越用越乱 | 所有本地产物默认写入 `taiji-output/`，包括浏览器 profile、抓取结果、提交包、dry-run/live 结果和 config diff。 |
+| 评测任务结果只能靠浏览器看 | 批量抓取 Evaluation 任务和 event log，输出 `eval-tasks.json`、`eval-tasks-summary.csv` 和每个任务的日志文件。 |
 
 ## 它让 Agent 可以做什么
 
@@ -81,6 +82,8 @@ taac2026 --help
 | 抓 Pod logs | `logs/<jobId>/<instanceId>.txt` |
 | 下载训练代码 | `code/<jobId>/files/...` |
 | 保存任务详情 | `code/<jobId>/job-detail.json`、`train-files.json` |
+| 批量抓 Evaluation 任务 | `eval-tasks.json`、`eval-tasks-summary.csv` |
+| 抓评测 event log | `eval-logs/<task_id>.txt` |
 | 比较 config | `taiji-output/config-diffs/*.json` 或 Markdown |
 | 准备提交包 | `taiji-output/submit-bundle/` |
 | dry-run / live submit | `taiji-output/submit-live/<timestamp>/` |
@@ -117,6 +120,13 @@ taac2026 scrape --all --job-internal-id 56242 --cookie-file taiji-output/secrets
 
 ```bash
 taac2026 scrape --all --cookie-file taiji-output/secrets/taiji-cookie.txt --direct
+```
+
+抓取所有 Evaluation 评测任务和 event log：
+
+```bash
+taac2026 scrape --evaluation --cookie-file taiji-output/secrets/taiji-cookie.txt --headless
+taac2026 scrape --evaluation --cookie-file taiji-output/secrets/taiji-cookie.txt --direct
 ```
 
 比较两个配置：
@@ -327,9 +337,12 @@ taiji-output/
   jobs-summary.csv
   all-checkpoints.csv
   all-metrics-long.csv
+  eval-tasks.json
+  eval-tasks-summary.csv
   browser-profile/
   code/<jobId>/
   config-diffs/
+  eval-logs/<task_id>/
   logs/<jobId>/
   secrets/
   submit-bundle/
@@ -349,6 +362,7 @@ taiji-output/
 - 想让 agent 总结一批 Taiji Job 的训练指标。
 - 想比较两个实验版本的 `config.yaml`。
 - 想把每个 Job 的代码、日志、checkpoint 和指标归档起来。
+- 想查看所有 Evaluation 评测任务的 score、infer_time 和 event log。
 - 想用一个已成功的模板 Job 自动提交下一组代码和配置。
 - 想让 agent 先整理历史实验的证据，再由人和 agent 共同判断下一步策略。
 

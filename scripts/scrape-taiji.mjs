@@ -26,6 +26,7 @@ function usage() {
   node scripts/scrape-taiji.mjs --all [options]
 
 Options:
+  --evaluation                       Scrape the evaluation task list plus event logs.
   --all                              Scrape the training Job list plus details, metrics, logs, checkpoints, and code files.
   --url <ckpt-url>                   Scrape one ckpt page. A positional URL is also accepted.
   --cookie-file <file>               Cookie header or Copy-as-cURL text.
@@ -45,6 +46,7 @@ function parseArgs(argv) {
   const args = {
     url: DEFAULT_URL,
     all: false,
+    evaluation: false,
     outDir: DEFAULT_OUT_ROOT,
     headless: false,
     incremental: false,
@@ -59,6 +61,10 @@ function parseArgs(argv) {
     else if (arg === "--all") {
       args.all = true;
       args.url = TRAINING_URL;
+    }
+    else if (arg === "--evaluation") {
+      args.evaluation = true;
+      args.url = "https://taiji.algo.qq.com/evaluation";
     }
     else if (arg === "--out" && argv[i + 1]) args.outDir = argv[++i];
     else if (arg === "--cookie-file" && argv[i + 1]) args.cookieFile = argv[++i];
@@ -473,6 +479,28 @@ async function fetchJobInstances(page, taskID, pageSize, authWaitMs) {
   return instances;
 }
 
+async function fetchEvaluationTasks(page, pageSize, authWaitMs) {
+  const tasks = [];
+  for (let pageNum = 1; ; pageNum += 1) {
+    const response = await fetchJsonFromPage(page, "/aide/api/evaluation_tasks/", {
+      params: { page: pageNum, page_size: pageSize },
+      authWaitMs,
+    });
+    const rows = response?.results ?? [];
+    tasks.push(...rows);
+
+    if (!rows.length || rows.length < pageSize || response?.next == null) break;
+  }
+  return tasks;
+}
+
+async function fetchEvaluationLog(page, taskId, authWaitMs) {
+  return fetchJsonFromPage(page, "/aide/api/evaluation_tasks/event_log/", {
+    params: { task_id: taskId },
+    authWaitMs,
+  });
+}
+
 async function fetchInstanceOutput(page, instanceId, authWaitMs) {
   const [checkpoints, tfEvents] = await Promise.all([
     fetchJsonFromPage(page, `/taskmanagement/api/v1/instances/external/${instanceId}/get_ckpt`, { authWaitMs }),
@@ -786,6 +814,72 @@ async function saveJobCodeFiles(page, outputDir, jobId, jobDetail, authWaitMs) {
   };
 }
 
+async function scrapeEvaluationTasks(page, args, outputDir) {
+  const EVAL_URL = "https://taiji.algo.qq.com/evaluation";
+  if (!isDirectClient(page)) await waitForLogin(page, EVAL_URL, args.timeoutMs, ["Evaluation", "评测", "evaluation"]);
+
+  const tasks = await fetchEvaluationTasks(page, args.pageSize, args.authTimeoutMs);
+  console.log(`Found ${tasks.length} evaluation tasks`);
+
+  const evalLogDir = path.join(outputDir, "eval-logs");
+  await mkdir(evalLogDir, { recursive: true });
+
+  const evalTasksById = {};
+  for (const task of tasks) {
+    const taskId = task.id;
+    if (!taskId) continue;
+
+    evalTasksById[taskId] = { ...task };
+
+    try {
+      const logResponse = await fetchEvaluationLog(page, taskId, args.authTimeoutMs);
+      const logList = logResponse?.data?.list ?? [];
+
+      // Save log as JSON
+      await writeFile(path.join(evalLogDir, `${taskId}.json`), JSON.stringify(logList, null, 2), "utf8");
+
+      // Save log as plain text (newest-first order, matching the API)
+      const textLines = logList.map((entry) => `[${entry.time}] ${entry.message}`).join("\n");
+      await writeFile(path.join(evalLogDir, `${taskId}.txt`), textLines, "utf8");
+
+      evalTasksById[taskId].log = { entries: logList.length, path: `eval-logs/${taskId}.txt` };
+      console.log(`  Task ${taskId}: ${logList.length} log entries, score=${task.score ?? "N/A"}, status=${task.status}`);
+    } catch (error) {
+      evalTasksById[taskId].log = { error: error instanceof Error ? error.message : String(error) };
+      console.log(`  Task ${taskId}: log fetch failed: ${error}`);
+    }
+  }
+
+  const result = {
+    sourceUrl: EVAL_URL,
+    fetchedAt: new Date().toISOString(),
+    count: tasks.length,
+    tasksById: evalTasksById,
+  };
+
+  // Save full JSON
+  await writeFile(path.join(outputDir, "eval-tasks.json"), JSON.stringify(result, null, 2), "utf8");
+
+  // Save summary CSV
+  await writeFile(path.join(outputDir, "eval-tasks-summary.csv"), toCsv(tasks.map((task) => ({
+    id: task.id,
+    name: task.name,
+    mould_id: task.mould_id,
+    status: task.status,
+    modifier: task.modifier,
+    create_time: task.create_time,
+    update_time: task.update_time,
+    score: task.score ?? "",
+    auc: task.results?.auc ?? "",
+    infer_time: task.infer_time ?? "",
+    error_msg: task.error_msg ?? "",
+    files: Array.isArray(task.files) ? task.files.length : 0,
+    log_entries: evalTasksById[task.id]?.log?.entries ?? 0,
+  }))), "utf8");
+
+  console.log(`Saved ${tasks.length} evaluation tasks to ${outputDir}`);
+}
+
 async function scrapeAllTrainingJobs(page, args, outputDir) {
   if (!isDirectClient(page)) await waitForLogin(page, TRAINING_URL, args.timeoutMs, ["Model Training Job", "模型训练任务", "Job ID", "任务ID"]);
 
@@ -939,7 +1033,8 @@ async function main() {
 
   if (args.direct) {
     const client = await createDirectClient(args.cookieFile);
-    if (args.all) await scrapeAllTrainingJobs(client, args, outputDir);
+    if (args.evaluation) await scrapeEvaluationTasks(client, args, outputDir);
+    else if (args.all) await scrapeAllTrainingJobs(client, args, outputDir);
     else await scrapeSingleCkptPage(client, args, outputDir);
     return;
   }
@@ -952,7 +1047,8 @@ async function main() {
   try {
     await addCookiesFromFile(context, args.cookieFile);
     const page = context.pages()[0] ?? (await context.newPage());
-    if (args.all) await scrapeAllTrainingJobs(page, args, outputDir);
+    if (args.evaluation) await scrapeEvaluationTasks(page, args, outputDir);
+    else if (args.all) await scrapeAllTrainingJobs(page, args, outputDir);
     else await scrapeSingleCkptPage(page, args, outputDir);
   } finally {
     await context.close();

@@ -7,6 +7,7 @@ const TRAINING_URL = "https://taiji.algo.qq.com/training";
 export interface FetchOptions {
   method?: "GET" | "POST" | "PUT" | "DELETE";
   params?: Record<string, unknown>;
+  body?: unknown;
   authWaitMs?: number;
   maxRetries?: number;
   retryDelayMs?: number;
@@ -56,7 +57,7 @@ export async function fetchJson<T = unknown>(
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
       if (isDirectClient(client)) {
-        return await fetchDirect<T>(client, endpoint, { method, params: options.params });
+        return await fetchDirect<T>(client, endpoint, { method, params: options.params, body: options.body });
       }
       throw new Error("Browser mode requires a Playwright page object");
     } catch (error) {
@@ -73,16 +74,16 @@ export async function fetchJson<T = unknown>(
 async function fetchDirect<T = unknown>(
   client: DirectClient,
   endpoint: string,
-  options: { method?: string; params?: Record<string, unknown> }
+  options: { method?: string; params?: Record<string, unknown>; body?: unknown }
 ): Promise<T> {
   const url = buildUrl(endpoint, options.params);
   const method = options.method ?? "GET";
   const headers = buildHeaders(client.directCookieHeader);
   const requestInit: RequestInit = { method, headers };
 
-  if (method !== "GET" && options.params) {
+  if (method !== "GET" && options.body) {
     headers["content-type"] = "application/json";
-    requestInit.body = JSON.stringify(options.params);
+    requestInit.body = JSON.stringify(options.body);
   }
 
   const response = await fetch(url, requestInit);

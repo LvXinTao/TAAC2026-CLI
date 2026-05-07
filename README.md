@@ -16,7 +16,7 @@ TAAC2026 CLI 面向 `https://taiji.algo.qq.com/training` 和 `https://taiji.algo
 请安装并使用这个通用 agent CLI：
 https://github.com/ZhongKuang/TAAC2026-CLI.git
 
-安装后请运行 npm install。需要全局 CLI 时运行 npm link。
+安装后请运行 npm install 和 npm run build。需要全局 CLI 时运行 npm link。
 需要浏览器模式时再安装 Chromium：
 npx playwright install chromium
 ```
@@ -27,6 +27,7 @@ npx playwright install chromium
 git clone https://github.com/ZhongKuang/TAAC2026-CLI.git
 cd TAAC2026-CLI
 npm install
+npm run build
 npm link
 npx playwright install chromium
 ```
@@ -37,7 +38,39 @@ npx playwright install chromium
 taac2026 --help
 ```
 
-如果当前仓库已经内置了本工具，可以直接进入 `.codex/skills/taiji-metrics-scraper/` 后运行 `npm install`，或从仓库根目录用 `node .codex/skills/taiji-metrics-scraper/bin/taac2026.mjs ...`。
+## 命令结构
+
+重构后的 CLI 使用嵌套子命令结构，按训练生命周期分组：
+
+```
+taac2026
+├── login                              # 浏览器 SSO 登录，保存 cookie
+├── train
+│   ├── prepare                        # 准备提交包
+│   ├── submit                         # 上传到 COS 并创建 Job
+│   ├── create                         # 创建 Job
+│   ├── run                            # 启动训练 instance
+│   ├── list                           # 抓取训练任务列表
+│   ├── logs                           # 获取实验日志
+│   ├── metrics                        # 获取实验指标
+│   ├── stop                           # 停止 Job
+│   ├── delete                         # 删除 Job
+│   ├── doctor                         # 提交前检查
+│   ├── verify                         # 提交后回读校验
+│   ├── compare                        # 跨实验对比
+│   ├── compare-runs                   # 对比 base vs exp
+│   ├── ckpt-select                    # checkpoint 候选
+│   ├── config-diff                    # config 语义对比
+│   ├── ledger                         # 同步实验账本
+│   └── diagnose                       # 诊断失败 Job
+└── eval
+    ├── create                         # 创建评测任务
+    ├── list                           # 抓取评测任务列表
+    ├── logs                           # 查看评测日志
+    └── metrics                        # 查看评测指标
+```
+
+> **兼容性**：旧的 `taac2026 scrape`、`taac2026 diff-config` 等扁平命令仍然可用，但推荐迁移到新的 `taac2026 train list`、`taac2026 train config-diff` 等子命令。
 
 ## 痛点：训练平台不该占用你的工作记忆
 
@@ -47,26 +80,26 @@ taac2026 --help
 
 更糟的是提交训练本身也容易出错。好不容易写了一版不错的代码，上传时却可能传错 zip、忘了换 config、只改了标题没改超参数，白白跑几个 epoch 才发现。于是每次提交都变成一场小心翼翼的人工仪式。
 
-最关键的是，训练产出的 metric 明明应该交给 agent 跨实例分析，却常常只能靠人脑短时记忆做比较。TAAC2026 CLI 的目的就是把这些“页面劳动”变成可归档、可比较、可自动化的实验数据流。
+最关键的是，训练产出的 metric 明明应该交给 agent 跨实例分析，却常常只能靠人脑短时记忆做比较。TAAC2026 CLI 的目的就是把这些"页面劳动"变成可归档、可比较、可自动化的实验数据流。
 
 ## 我们能解决什么
 
 | 痛点 | TAAC2026 CLI 怎么解决 |
 | --- | --- |
-| 每天手动点开多个实例看曲线 | 批量抓取 Job、实例、checkpoint 和 metrics，输出 `jobs.json`、`all-metrics-long.csv`、`all-checkpoints.csv`。 |
+| 每天手动点开多个实例看曲线 | `taac2026 train list` 批量抓取 Job、实例、checkpoint 和 metrics，输出 `jobs.json`、`all-metrics-long.csv`、`all-checkpoints.csv`。 |
 | metric 多了以后只能靠鼠标滑动和人脑记忆对比 | 把指标转成长表，保留 `jobId + instanceId + metric + step`，让 agent 可以一次性跨 Job / Run 做排序、对比和总结。 |
-| 同一个 Job 多次 Run 容易混在一起 | 用 `jobId + instanceId` 区分每次运行，避免“这个 AUC 到底是哪次跑出来的”。 |
-| 报错后需要手动复制日志，再口头解释代码版本 | 自动归档 Pod log、Job detail、训练代码文件和 `config.yaml`，让 agent 拿着完整现场排查。 |
-| 对比两个实验配置时只能肉眼扫 YAML | `compare-config-yaml.mjs` 做语义 diff，按配置路径报告新增、删除和变化项。 |
-| 上传训练容易传错 zip / config / run.sh / 标题和说明 | `prepare-taiji-submit.mjs` 先生成提交包和 manifest，记录 Job Name、Description、Git HEAD、dirty 状态和待上传文件。 |
-| 想自动提交但又怕误启动训练 | `submit-taiji.mjs` 默认 dry-run；真实创建必须显式 `--execute --yes`，启动必须额外 `--run`。 |
+| 同一个 Job 多次 Run 容易混在一起 | 用 `jobId + instanceId` 区分每次运行，避免"这个 AUC 到底是哪次跑出来的"。 |
+| 报错后需要手动复制日志，再口头解释代码版本 | `taac2026 train logs` 自动归档 Pod log、Job detail、训练代码文件和 `config.yaml`，让 agent 拿着完整现场排查。 |
+| 对比两个实验配置时只能肉眼扫 YAML | `taac2026 train config-diff` 做语义 diff，按配置路径报告新增、删除和变化项。 |
+| 上传训练容易传错 zip / config / run.sh / 标题和说明 | `taac2026 train prepare` 先生成提交包和 manifest，记录 Job Name、Description、Git HEAD、dirty 状态和待上传文件。 |
+| 想自动提交但又怕误启动训练 | `taac2026 train submit` 默认 dry-run；真实创建必须显式 `--execute --yes`，启动必须额外 `--run`。 |
 | 工具产物散落根目录，越用越乱 | 所有本地产物默认写入 `taiji-output/`，包括浏览器 profile、抓取结果、提交包、dry-run/live 结果和 config diff。 |
-| 评测任务结果只能靠浏览器看 | 批量抓取 Evaluation 任务和 event log，输出 `eval-tasks.json`、`eval-tasks-summary.csv` 和每个任务的日志文件。 |
+| 评测任务结果只能靠浏览器看 | `taac2026 eval list` 批量抓取 Evaluation 任务和 event log，输出 `eval-tasks.json`、`eval-tasks-summary.csv` 和每个任务的日志文件。 |
 
 ## 它让 Agent 可以做什么
 
 - 一键抓取最近所有训练，把实验指标整理成可分析表格。
-- 帮你回答“这一版到底比上一版强在哪里，弱在哪里”。
+- 帮你回答"这一版到底比上一版强在哪里，弱在哪里"。
 - 结合 Job 描述、config diff、日志和曲线，定位训练报错或指标异常。
 - 在提交前检查本次 zip/config/run.sh/name/description 是否和 manifest 一致。
 - 复用一个稳定模板 Job，自动替换 `code.zip`、`config.yaml`，并可显式覆写 `run.sh` 后按需启动训练。
@@ -87,53 +120,71 @@ taac2026 --help
 | 比较 config | `taiji-output/config-diffs/*.json` 或 Markdown |
 | 准备提交包 | `taiji-output/submit-bundle/` |
 | dry-run / live submit | `taiji-output/submit-live/<timestamp>/` |
-| 实验安全检查 / 回读校验 | `submit doctor`、`submit verify` |
-| 实验证据整理 | `compare jobs`、`compare-runs`、`config diff-ref`、`ledger sync`、`logs`、`diagnose job`、`ckpt-select` |
+| 实验安全检查 / 回读校验 | `train doctor`、`train verify` |
+| 实验证据整理 | `train compare`、`train compare-runs`、`train config-diff`、`train ledger`、`train diagnose`、`train ckpt-select` |
 
 ## 快速开始
 
-把浏览器里已经登录成功的 Cookie 保存到：
+### 登录
 
-```text
-taiji-output/secrets/taiji-cookie.txt
+使用浏览器 SSO 登录并保存 cookie：
+
+```bash
+taac2026 login --headless
 ```
+
+或使用已有的 cookie 文件：
+
+```bash
+taac2026 login --cookie-file path/to/cookie.txt
+```
+
+Cookie 默认保存到 `taiji-output/secrets/taiji-cookie.txt`。
+
+### 抓取训练任务
 
 抓取全部训练任务：
 
 ```bash
-taac2026 scrape --all --cookie-file taiji-output/secrets/taiji-cookie.txt --headless
+taac2026 train list --all --cookie-file taiji-output/secrets/taiji-cookie.txt --headless
 ```
 
 增量同步会完整扫描 Job list，但对本地已有、终态、且 `updateTime/status/jzStatus` 没变的 Job 跳过 detail、代码、实例、metric 和 log 的深拉：
 
 ```bash
-taac2026 scrape --all --incremental --cookie-file taiji-output/secrets/taiji-cookie.txt --direct
+taac2026 train list --all --incremental --cookie-file taiji-output/secrets/taiji-cookie.txt --direct
 ```
 
 只核查某个 Job 的详情、代码文件和指标时，可以按平台内部 ID 定向抓取：
 
 ```bash
-taac2026 scrape --all --job-internal-id 56242 --cookie-file taiji-output/secrets/taiji-cookie.txt --direct
+taac2026 train list --all --job-internal-id 56242 --cookie-file taiji-output/secrets/taiji-cookie.txt --direct
 ```
 
 服务器上 Chromium 不稳定时，用后端直连模式：
 
 ```bash
-taac2026 scrape --all --cookie-file taiji-output/secrets/taiji-cookie.txt --direct
+taac2026 train list --all --cookie-file taiji-output/secrets/taiji-cookie.txt --direct
 ```
 
-抓取所有 Evaluation 评测任务和 event log：
+### 抓取评测任务
 
 ```bash
-taac2026 scrape --evaluation --cookie-file taiji-output/secrets/taiji-cookie.txt --headless
-taac2026 scrape --evaluation --cookie-file taiji-output/secrets/taiji-cookie.txt --direct
+taac2026 eval list --cookie-file taiji-output/secrets/taiji-cookie.txt --direct
 ```
 
-比较两个配置：
+### 查看日志和指标
 
 ```bash
-taac2026 diff-config old-config.yaml new-config.yaml
-taac2026 diff-config old-config.yaml new-config.yaml --json --out diff.json
+taac2026 train logs --job 56242 --cookie-file taiji-output/secrets/taiji-cookie.txt --direct
+taac2026 train metrics --job 56242 --cookie-file taiji-output/secrets/taiji-cookie.txt --direct
+```
+
+### 比较配置
+
+```bash
+taac2026 train config-diff old-config.yaml new-config.yaml
+taac2026 train config-diff old-config.yaml new-config.yaml --json --out diff.json
 ```
 
 `--out diff.json` 会写到 `taiji-output/config-diffs/diff.json`，不会掉到根目录。
@@ -145,46 +196,39 @@ taac2026 diff-config old-config.yaml new-config.yaml --json --out diff.json
 提交前检查 bundle：
 
 ```bash
-taac2026 submit doctor --bundle taiji-output/submit-bundle
+taac2026 train doctor --bundle taiji-output/submit-bundle
 ```
 
 提交后回读平台文件，确认平台实际 `code.zip/config.yaml/run.sh` 和本地 bundle 一致：
 
 ```bash
-taac2026 scrape --all --job-internal-id 56242 --cookie-file taiji-output/secrets/taiji-cookie.txt --direct
-taac2026 submit verify --bundle taiji-output/submit-bundle --job-internal-id 56242
+taac2026 train verify --bundle taiji-output/submit-bundle --job-internal-id 56242 --cookie-file taiji-output/secrets/taiji-cookie.txt --direct
 ```
 
 跨实验整理指标、描述里的人工 test 分、valid/test-like 曲线证据：
 
 ```bash
-taac2026 compare jobs 56242 58244 --json
+taac2026 train compare 56242 58244 --json
 ```
 
 对比一个 base 和一个实验 Job，合并 config diff、best/final 指标差异、同向性和候选 checkpoint 规则结果：
 
 ```bash
-taac2026 compare-runs --base 58244 --exp 56242 --config --metrics --json
-```
-
-比较当前配置和某个明确 Job 的平台配置，不做“最高分对齐”假设：
-
-```bash
-taac2026 config diff-ref --config config.yaml --job-internal-id 56242 --json
+taac2026 train compare-runs --base 58244 --exp 56242 --config --metrics --json
 ```
 
 同步结构化实验账本，或诊断失败 Job：
 
 ```bash
-taac2026 ledger sync
-taac2026 diagnose job --job-internal-id 56242 --json
+taac2026 train ledger sync
+taac2026 train diagnose --job-internal-id 56242 --json
 ```
 
 快速抽取错误日志，或按明确指标规则列出 checkpoint 候选：
 
 ```bash
-taac2026 logs --job 60414 --errors --tail 100 --json
-taac2026 ckpt-select --job 56242 --by valid_auc --json
+taac2026 train logs --job 60414 --errors --tail 100
+taac2026 train ckpt-select --job 56242 --by valid_auc --json
 ```
 
 ## 自动提交训练
@@ -219,7 +263,7 @@ examples/minimal-taiji-submit/
 如果别人的模板不是 zip 形态，而是散文件，例如 `main.py + dataset.py + run.sh`，也可以用通用文件适配：
 
 ```bash
-taac2026 prepare-submit \
+taac2026 train prepare \
   --template-job-url "https://taiji.algo.qq.com/training/..." \
   --file-dir "./taiji-files" \
   --name "loose_files_exp"
@@ -243,7 +287,7 @@ taiji-files/
 也可以单独列文件：
 
 ```bash
-taac2026 prepare-submit \
+taac2026 train prepare \
   --template-job-url "https://taiji.algo.qq.com/training/..." \
   --zip "./submits/0505/V1.4.0/code.zip" \
   --config "./submits/0505/V1.4.0/config.yaml" \
@@ -258,7 +302,7 @@ taac2026 prepare-submit \
 准备一个提交包：
 
 ```bash
-taac2026 prepare-submit \
+taac2026 train prepare \
   --template-job-url "https://taiji.algo.qq.com/training/..." \
   --zip "./submits/0505/V1.4.0/code.zip" \
   --config "./submits/0505/V1.4.0/config.yaml" \
@@ -285,7 +329,7 @@ taiji-output/submit-bundle/
 生成 dry-run 提交计划：
 
 ```bash
-taac2026 submit \
+taac2026 train submit \
   --bundle taiji-output/submit-bundle \
   --cookie-file taiji-output/secrets/taiji-cookie.txt \
   --template-job-internal-id <TEMPLATE_JOB_INTERNAL_ID>
@@ -294,7 +338,7 @@ taac2026 submit \
 真实上传并创建 Job：
 
 ```bash
-taac2026 submit \
+taac2026 train submit \
   --bundle taiji-output/submit-bundle \
   --cookie-file taiji-output/secrets/taiji-cookie.txt \
   --template-job-internal-id <TEMPLATE_JOB_INTERNAL_ID> \
@@ -304,7 +348,7 @@ taac2026 submit \
 上传、创建并启动训练：
 
 ```bash
-taac2026 submit \
+taac2026 train submit \
   --bundle taiji-output/submit-bundle \
   --cookie-file taiji-output/secrets/taiji-cookie.txt \
   --template-job-internal-id <TEMPLATE_JOB_INTERNAL_ID> \
@@ -316,7 +360,7 @@ taac2026 submit \
 如果模板 Job 里没有同名 `code.zip`、`config.yaml`，或在传入 `--run-sh` / `--file` / `--file-dir` 时没有对应同名 trainFile，脚本会默认报错，避免旧文件和新文件同时存在。只有明确要新增 trainFiles 时才加：
 
 ```bash
-taac2026 submit ... --execute --yes --allow-add-file
+taac2026 train submit ... --execute --yes --allow-add-file
 ```
 
 ## 安全默认值
@@ -324,7 +368,7 @@ taac2026 submit ... --execute --yes --allow-add-file
 - Cookie、HAR、headers 建议放在 `taiji-output/secrets/` 或 `taiji-output/har/`，不要提交。
 - 所有脚本默认把本地产物写到 `taiji-output/`。
 - 相对输出路径不能包含 `..`；如果确实要写到外部位置，请使用绝对路径。
-- `submit-taiji.mjs` 默认 dry-run。
+- `taac2026 train submit` 默认 dry-run。
 - 真实平台写操作必须显式加 `--execute --yes`。
 - 启动训练必须额外显式加 `--run`。
 - 脚本会保留模板 Job 的环境、镜像和入口；默认严格替换模板中已有的 `code.zip` 和 `config.yaml`，传入 `--run-sh` 时才严格替换同名 `run.sh`，传入 `--file` 或 `--file-dir` 时才严格替换对应通用文件。
@@ -372,16 +416,33 @@ taiji-output/
 - 平台接口发生变化且没有新的 DevTools 请求样本。
 - 需要完全无人工确认地消耗线上训练资源。
 
+## 项目结构
+
+```
+src/
+├── api/                 # HTTP 客户端、训练 API、评测 API、COS 上传
+├── auth/                # Cookie 管理、浏览器 SSO 登录
+├── cli/
+│   ├── index.ts         # CLI 入口（program.parse）
+│   └── commands/        # train/ 和 eval/ 子命令
+├── config/              # 参数默认值与解析
+├── utils/               # 输出路径管理、格式化
+├── scrape/              # 抓取逻辑
+└── types.ts             # 共享 TypeScript 类型
+```
+
 ## 脚本清单
 
-| 脚本 | 用途 |
+| 入口 | 用途 |
 | --- | --- |
-| `bin/taac2026.mjs` / `taac2026` | 统一 CLI 入口，分发到下列子命令 |
-| `scripts/scrape-taiji.mjs` | 抓取 Job、实例、指标、日志、checkpoint、代码文件 |
-| `scripts/compare-config-yaml.mjs` | 语义比较两个 YAML 配置 |
-| `scripts/prepare-taiji-submit.mjs` | 准备本地提交包，记录 Git 状态和上传文件 |
-| `scripts/submit-taiji.mjs` | dry-run 或显式执行 Taiji 上传、创建、Run 流程 |
-| `scripts/experiment-tools.mjs` | 提交前检查、提交后回读校验、实验对比、账本同步和日志诊断 |
+| `bin/taac2026.mjs` | 统一 CLI 入口，转发到 `dist/cli/index.js` |
+| `dist/cli/index.js` | TypeScript 编译后的 CLI 入口（`taac2026` 命令实际执行文件） |
+| `src/cli/commands/` | 所有 train/eval 子命令的 TypeScript 源码 |
+| `scripts/scrape-taiji.mjs` | 旧版抓取脚本（兼容保留，推荐迁移到 `taac2026 train list`） |
+| `scripts/compare-config-yaml.mjs` | 旧版配置比较（兼容保留，推荐迁移到 `taac2026 train config-diff`） |
+| `scripts/prepare-taiji-submit.mjs` | 旧版提交准备（兼容保留，推荐迁移到 `taac2026 train prepare`） |
+| `scripts/submit-taiji.mjs` | 旧版提交执行（兼容保留，推荐迁移到 `taac2026 train submit`） |
+| `scripts/experiment-tools.mjs` | 旧版实验工具（兼容保留，推荐迁移到对应 `taac2026 train` 子命令） |
 
 ## 故障判断
 
@@ -394,8 +455,9 @@ taiji-output/
 ## 开发验证
 
 ```bash
+npm run build
 npm run check
 npm run test
 ```
 
-`check` 会对所有 bundled scripts 执行 `node --check`；`test` 会跑提交安全和输出路径的小型行为测试。
+`build` 编译 TypeScript 到 `dist/`。`check` 会对所有 bundled scripts 执行 `node --check`；`test` 会跑提交安全和输出路径的小型行为测试。

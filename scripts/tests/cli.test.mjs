@@ -11,39 +11,36 @@ const cliPath = fileURLToPath(new URL("../../bin/taac2026.mjs", import.meta.url)
 test("taac2026 CLI prints top-level command help", async () => {
   const { stdout } = await execFileAsync(process.execPath, [cliPath, "--help"], { cwd: toolDir });
 
-  assert.match(stdout, /TAAC2026 CLI/);
-  assert.match(stdout, /scrape/);
-  assert.match(stdout, /diff-config/);
-  assert.match(stdout, /prepare-submit/);
+  assert.match(stdout, /taac2026/);
+  assert.match(stdout, /login/);
+  assert.match(stdout, /train/);
+  assert.match(stdout, /eval/);
+});
+
+test("taac2026 train prints subcommand list", async () => {
+  const { stdout } = await execFileAsync(process.execPath, [cliPath, "train", "--help"], { cwd: toolDir });
+
+  assert.match(stdout, /prepare/);
   assert.match(stdout, /submit/);
-  assert.match(stdout, /compare/);
-  assert.match(stdout, /compare-runs/);
+  assert.match(stdout, /list/);
   assert.match(stdout, /logs/);
-  assert.match(stdout, /ckpt-select/);
-  assert.match(stdout, /ledger/);
+  assert.match(stdout, /metrics/);
+  assert.match(stdout, /config-diff/);
+  assert.match(stdout, /doctor/);
+  assert.match(stdout, /compare/);
 });
 
-test("taac2026 CLI dispatches to bundled commands", async () => {
-  const { stdout } = await execFileAsync(process.execPath, [cliPath, "prepare-submit", "--help"], { cwd: toolDir });
+test("taac2026 train prepare help includes expected options", async () => {
+  const { stdout } = await execFileAsync(process.execPath, [cliPath, "train", "prepare", "--help"], { cwd: toolDir });
 
-  assert.match(stdout, /prepare-taiji-submit/);
+  assert.match(stdout, /--template-job-url/);
   assert.match(stdout, /--file-dir/);
+  assert.match(stdout, /--name/);
 });
 
-test("taac2026 scrape help does not launch a browser", async () => {
-  const { stdout } = await execFileAsync(process.execPath, [cliPath, "scrape", "--help"], { cwd: toolDir });
+test("taac2026 train submit help includes execute flag", async () => {
+  const { stdout } = await execFileAsync(process.execPath, [cliPath, "train", "submit", "--help"], { cwd: toolDir });
 
-  assert.match(stdout, /taac2026 scrape/);
-  assert.match(stdout, /--direct/);
-  assert.match(stdout, /--job-internal-id/);
-});
-
-test("taac2026 CLI dispatches experiment helper commands", async () => {
-  const { stdout: doctorHelp } = await execFileAsync(process.execPath, [cliPath, "submit", "doctor", "--help"], { cwd: toolDir });
-  const { stdout: compareHelp } = await execFileAsync(process.execPath, [cliPath, "compare", "jobs", "--help"], { cwd: toolDir });
-  const { stdout: compareRunsHelp } = await execFileAsync(process.execPath, [cliPath, "compare-runs", "--help"], { cwd: toolDir });
-
-  assert.match(doctorHelp, /submit doctor/);
-  assert.match(compareHelp, /compare jobs/);
-  assert.match(compareRunsHelp, /compare-runs/);
+  assert.match(stdout, /--bundle/);
+  assert.match(stdout, /--execute/);
 });

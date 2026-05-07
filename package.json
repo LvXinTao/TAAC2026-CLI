@@ -5,12 +5,12 @@
   "description": "Agent-friendly TAAC2026 / Taiji experiment CLI for metrics, logs, config diffs, and safe submits.",
   "type": "module",
   "bin": {
-    "taac2026": "./bin/taac2026.mjs"
+    "taac2026": "./dist/cli/index.js"
   },
   "scripts": {
     "build": "tsc",
     "dev": "tsx src/cli/index.ts",
-    "cli": "node bin/taac2026.mjs",
+    "cli": "node dist/cli/index.js",
     "scrape": "node scripts/scrape-taiji.mjs",
     "scrape:all": "node scripts/scrape-taiji.mjs --all",
     "diff:config": "node scripts/compare-config-yaml.mjs",
@@ -28,6 +28,7 @@
   "devDependencies": {
     "@types/js-yaml": "^4.0.9",
     "@types/node": "^22.0.0",
+    "@types/cos-nodejs-sdk-v5": "^2.15.0",
     "tsx": "^4.19.0",
     "typescript": "^5.7.0"
   }

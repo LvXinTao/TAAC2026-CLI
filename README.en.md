@@ -4,7 +4,7 @@
 
 Turn the Taiji / TAAC training platform into an experiment CLI that humans and agents can read, compare, archive, submit, and run.
 
-TAAC2026 CLI targets `https://taiji.algo.qq.com/training`. It can scrape training jobs, metrics, logs, checkpoints, and training code; compare two `config.yaml` files semantically; and prepare or explicitly execute the captured Taiji submit workflow. All local artifacts default to `taiji-output/`, keeping your repository root clean.
+TAAC2026 CLI targets `https://taiji.algo.qq.com/training` and `https://taiji.algo.qq.com/evaluation`. It can scrape training jobs, metrics, logs, checkpoints, and training code; compare two `config.yaml` files semantically; and prepare or explicitly execute the captured Taiji submit workflow. All local artifacts default to `taiji-output/`, keeping your repository root clean.
 
 `SKILL.md` is a universal agent runbook. Codex, Claude Code, OpenAI Agents SDK, Cursor, Aider, or any agent that can read repository files and run shell commands can use this CLI.
 
@@ -16,7 +16,7 @@ Send this to your agent:
 Please install and use this universal agent CLI:
 https://github.com/ZhongKuang/TAAC2026-CLI.git
 
-After installation, run npm install. Run npm link when a global CLI is useful.
+After installation, run npm install and npm run build. Run npm link when a global CLI is useful.
 Install Chromium only when browser mode is needed:
 npx playwright install chromium
 ```
@@ -27,6 +27,7 @@ Manual installation:
 git clone https://github.com/ZhongKuang/TAAC2026-CLI.git
 cd TAAC2026-CLI
 npm install
+npm run build
 npm link
 npx playwright install chromium
 ```
@@ -37,7 +38,39 @@ Then run:
 taac2026 --help
 ```
 
-If this tool is already bundled inside your project, run `npm install` from `.codex/skills/taiji-metrics-scraper/`, or call `node .codex/skills/taiji-metrics-scraper/bin/taac2026.mjs ...` from the repository root.
+## Command Structure
+
+The refactored CLI uses nested subcommands organized by training lifecycle:
+
+```
+taac2026
+├── login                              # Browser SSO login, save cookie
+├── train
+│   ├── prepare                        # Prepare submit bundle
+│   ├── submit                         # Upload to COS and create Job
+│   ├── create                         # Create Job
+│   ├── run                            # Start training instance
+│   ├── list                           # Scrape training job list
+│   ├── logs                           # Get experiment logs
+│   ├── metrics                        # Get experiment metrics
+│   ├── stop                           # Stop Job
+│   ├── delete                         # Delete Job
+│   ├── doctor                         # Pre-submit check
+│   ├── verify                         # Post-submit read-back
+│   ├── compare                        # Cross-experiment comparison
+│   ├── compare-runs                   # Compare base vs experiment
+│   ├── ckpt-select                    # Checkpoint candidates
+│   ├── config-diff                    # Config semantic diff
+│   ├── ledger                         # Sync experiment ledger
+│   └── diagnose                       # Diagnose failed Job
+└── eval
+    ├── create                         # Create evaluation task
+    ├── list                           # Scrape evaluation task list
+    ├── logs                           # View evaluation logs
+    └── metrics                        # View evaluation metrics
+```
+
+> **Compatibility**: Old flat commands like `taac2026 scrape` and `taac2026 diff-config` still work via the legacy `.mjs` scripts, but migrating to `taac2026 train list`, `taac2026 train config-diff`, etc. is recommended.
 
 ## The Pain: Training Platforms Should Not Own Your Working Memory
 
@@ -53,14 +86,15 @@ Most importantly, metrics should be compared by an agent across runs, not by hum
 
 | Pain | How TAAC2026 CLI helps |
 | --- | --- |
-| Opening many instances manually to inspect curves | Bulk scrape Jobs, instances, checkpoints, and metrics into `jobs.json`, `all-metrics-long.csv`, and `all-checkpoints.csv`. |
+| Opening many instances manually to inspect curves | `taac2026 train list` bulk scrapes Jobs, instances, checkpoints, and metrics into `jobs.json`, `all-metrics-long.csv`, and `all-checkpoints.csv`. |
 | Comparing many metrics by scrolling and memory | Export long-form metrics with `jobId + instanceId + metric + step`, so agents can rank, compare, and summarize across Jobs and reruns. |
 | Multiple runs under one Job are easy to mix up | Use `jobId + instanceId` as the run identity, so each metric belongs to the right execution. |
-| Failed runs require manual log copying and version explanation | Archive pod logs, Job detail, training code files, and `config.yaml` together, giving the agent the full scene. |
-| Config comparison requires eyeballing YAML | `compare-config-yaml.mjs` reports semantic added, removed, and changed entries by config path. |
-| Submits can silently use the wrong zip / config / run.sh / title / description | `prepare-taiji-submit.mjs` creates a manifest with Job Name, Description, Git HEAD, dirty state, and exact upload files. |
-| Automation is useful but accidental training starts are expensive | `submit-taiji.mjs` is dry-run by default; live creation requires `--execute --yes`, and start requires `--run`. |
+| Failed runs require manual log copying and version explanation | `taac2026 train logs` archives pod logs, Job detail, training code files, and `config.yaml` together, giving the agent the full scene. |
+| Config comparison requires eyeballing YAML | `taac2026 train config-diff` reports semantic added, removed, and changed entries by config path. |
+| Submits can silently use the wrong zip / config / run.sh / title / description | `taac2026 train prepare` creates a manifest with Job Name, Description, Git HEAD, dirty state, and exact upload files. |
+| Automation is useful but accidental training starts are expensive | `taac2026 train submit` is dry-run by default; live creation requires `--execute --yes`, and start requires `--run`. |
 | Tool artifacts clutter the repository root | All local artifacts default to `taiji-output/`, including browser profile, scrape output, bundles, live results, and config diffs. |
+| Evaluation results only visible in browser | `taac2026 eval list` scrapes Evaluation tasks and event logs into `eval-tasks.json`, `eval-tasks-summary.csv`, and per-task log files. |
 
 ## What Agents Can Do With It
 
@@ -81,49 +115,76 @@ Most importantly, metrics should be compared by an agent across runs, not by hum
 | Scrape Pod logs | `logs/<jobId>/<instanceId>.txt` |
 | Download training code | `code/<jobId>/files/...` |
 | Save Job detail | `code/<jobId>/job-detail.json`, `train-files.json` |
+| Bulk scrape Evaluation tasks | `eval-tasks.json`, `eval-tasks-summary.csv` |
+| Scrape evaluation event log | `eval-logs/<task_id>.txt` |
 | Compare configs | `taiji-output/config-diffs/*.json` or Markdown |
 | Prepare submit bundle | `taiji-output/submit-bundle/` |
 | Dry-run / live submit | `taiji-output/submit-live/<timestamp>/` |
-| Submit safety / read-back verification | `submit doctor`, `submit verify` |
-| Experiment evidence tools | `compare jobs`, `compare-runs`, `config diff-ref`, `ledger sync`, `logs`, `diagnose job`, `ckpt-select` |
+| Submit safety / read-back verification | `train doctor`, `train verify` |
+| Experiment evidence tools | `train compare`, `train compare-runs`, `train config-diff`, `train ledger`, `train diagnose`, `train ckpt-select` |
 
 ## Quick Start
 
-Save a valid Cookie from a logged-in browser request to:
+### Login
 
-```text
-taiji-output/secrets/taiji-cookie.txt
+Login via browser SSO and save cookie:
+
+```bash
+taac2026 login --headless
 ```
+
+Or use an existing cookie file:
+
+```bash
+taac2026 login --cookie-file path/to/cookie.txt
+```
+
+Cookie saves to `taiji-output/secrets/taiji-cookie.txt` by default.
+
+### Scrape Training Jobs
 
 Scrape all training jobs:
 
 ```bash
-taac2026 scrape --all --cookie-file taiji-output/secrets/taiji-cookie.txt --headless
+taac2026 train list --all --cookie-file taiji-output/secrets/taiji-cookie.txt --headless
 ```
 
 Incremental sync still scans the full Job list, but skips detail, code, instance, metric, and log fetches for cached terminal Jobs whose `updateTime/status/jzStatus` are unchanged:
 
 ```bash
-taac2026 scrape --all --incremental --cookie-file taiji-output/secrets/taiji-cookie.txt --direct
+taac2026 train list --all --incremental --cookie-file taiji-output/secrets/taiji-cookie.txt --direct
 ```
 
 To inspect one Job's detail, code files, and metrics, target the internal Taiji ID:
 
 ```bash
-taac2026 scrape --all --job-internal-id 56242 --cookie-file taiji-output/secrets/taiji-cookie.txt --direct
+taac2026 train list --all --job-internal-id 56242 --cookie-file taiji-output/secrets/taiji-cookie.txt --direct
 ```
 
 Use direct backend mode when Chromium is unreliable on a server:
 
 ```bash
-taac2026 scrape --all --cookie-file taiji-output/secrets/taiji-cookie.txt --direct
+taac2026 train list --all --cookie-file taiji-output/secrets/taiji-cookie.txt --direct
 ```
 
-Compare two configs:
+### Scrape Evaluation Tasks
 
 ```bash
-taac2026 diff-config old-config.yaml new-config.yaml
-taac2026 diff-config old-config.yaml new-config.yaml --json --out diff.json
+taac2026 eval list --cookie-file taiji-output/secrets/taiji-cookie.txt --direct
+```
+
+### View Logs and Metrics
+
+```bash
+taac2026 train logs --job 56242 --cookie-file taiji-output/secrets/taiji-cookie.txt --direct
+taac2026 train metrics --job 56242 --cookie-file taiji-output/secrets/taiji-cookie.txt --direct
+```
+
+### Compare Configs
+
+```bash
+taac2026 train config-diff old-config.yaml new-config.yaml
+taac2026 train config-diff old-config.yaml new-config.yaml --json --out diff.json
 ```
 
 `--out diff.json` writes to `taiji-output/config-diffs/diff.json`, not the repository root.
@@ -135,46 +196,39 @@ These commands organize evidence and catch avoidable mistakes. They do not decid
 Check a prepared bundle before submit:
 
 ```bash
-taac2026 submit doctor --bundle taiji-output/submit-bundle
+taac2026 train doctor --bundle taiji-output/submit-bundle
 ```
 
 After submit, scrape the new Job and verify the platform-side `code.zip/config.yaml/run.sh` against the local bundle:
 
 ```bash
-taac2026 scrape --all --job-internal-id 56242 --cookie-file taiji-output/secrets/taiji-cookie.txt --direct
-taac2026 submit verify --bundle taiji-output/submit-bundle --job-internal-id 56242
+taac2026 train verify --bundle taiji-output/submit-bundle --job-internal-id 56242 --cookie-file taiji-output/secrets/taiji-cookie.txt --direct
 ```
 
 Compare multiple Jobs as an evidence table with metrics, manually recorded test scores, and curve summaries:
 
 ```bash
-taac2026 compare jobs 56242 58244 --json
+taac2026 train compare 56242 58244 --json
 ```
 
 Compare one base Job against one experiment Job with config diff, best/final metric deltas, direction checks, and checkpoint candidates by explicit rule:
 
 ```bash
-taac2026 compare-runs --base 58244 --exp 56242 --config --metrics --json
-```
-
-Compare a local config against one explicit Job reference, without assuming any "best score" policy:
-
-```bash
-taac2026 config diff-ref --config config.yaml --job-internal-id 56242 --json
+taac2026 train compare-runs --base 58244 --exp 56242 --config --metrics --json
 ```
 
 Sync a structured experiment ledger, or extract diagnosis evidence from a failed Job:
 
 ```bash
-taac2026 ledger sync
-taac2026 diagnose job --job-internal-id 56242 --json
+taac2026 train ledger sync
+taac2026 train diagnose --job-internal-id 56242 --json
 ```
 
 Extract error logs quickly, or list checkpoint candidates by an explicit metric rule:
 
 ```bash
-taac2026 logs --job 60414 --errors --tail 100 --json
-taac2026 ckpt-select --job 56242 --by valid_auc --json
+taac2026 train logs --job 60414 --errors --tail 100
+taac2026 train ckpt-select --job 56242 --by valid_auc --json
 ```
 
 ## Submit Training
@@ -209,7 +263,7 @@ Your agent can follow this shape: package project code into `code.zip`, write ex
 For templates that use loose files such as `main.py + dataset.py + run.sh` instead of a pure zip shape, use generic file adaptation:
 
 ```bash
-taac2026 prepare-submit \
+taac2026 train prepare \
   --template-job-url "https://taiji.algo.qq.com/training/..." \
   --file-dir "./taiji-files" \
   --name "loose_files_exp"
@@ -233,7 +287,7 @@ This prepares a `run.sh` overwrite plus generic replacements for `dataset.py/mod
 You can also list files one by one:
 
 ```bash
-taac2026 prepare-submit \
+taac2026 train prepare \
   --template-job-url "https://taiji.algo.qq.com/training/..." \
   --zip "./submits/0505/V1.4.0/code.zip" \
   --config "./submits/0505/V1.4.0/config.yaml" \
@@ -248,7 +302,7 @@ taac2026 prepare-submit \
 Prepare a submit bundle:
 
 ```bash
-taac2026 prepare-submit \
+taac2026 train prepare \
   --template-job-url "https://taiji.algo.qq.com/training/..." \
   --zip "./submits/0505/V1.4.0/code.zip" \
   --config "./submits/0505/V1.4.0/config.yaml" \
@@ -275,7 +329,7 @@ taiji-output/submit-bundle/
 Generate a dry-run submit plan:
 
 ```bash
-taac2026 submit \
+taac2026 train submit \
   --bundle taiji-output/submit-bundle \
   --cookie-file taiji-output/secrets/taiji-cookie.txt \
   --template-job-internal-id <TEMPLATE_JOB_INTERNAL_ID>
@@ -284,7 +338,7 @@ taac2026 submit \
 Upload and create a Job:
 
 ```bash
-taac2026 submit \
+taac2026 train submit \
   --bundle taiji-output/submit-bundle \
   --cookie-file taiji-output/secrets/taiji-cookie.txt \
   --template-job-internal-id <TEMPLATE_JOB_INTERNAL_ID> \
@@ -294,7 +348,7 @@ taac2026 submit \
 Upload, create, and start training:
 
 ```bash
-taac2026 submit \
+taac2026 train submit \
   --bundle taiji-output/submit-bundle \
   --cookie-file taiji-output/secrets/taiji-cookie.txt \
   --template-job-internal-id <TEMPLATE_JOB_INTERNAL_ID> \
@@ -306,7 +360,7 @@ Only add `--run` when the user explicitly asks to start training. For upload val
 If the template Job does not contain matching `code.zip`, `config.yaml`, matching `run.sh` when `--run-sh` is provided, or matching generic trainFiles when `--file` / `--file-dir` is provided, the script fails by default so old and new files do not coexist silently. Add this only when you intentionally want to add trainFiles:
 
 ```bash
-taac2026 submit ... --execute --yes --allow-add-file
+taac2026 train submit ... --execute --yes --allow-add-file
 ```
 
 ## Safety Defaults
@@ -314,7 +368,7 @@ taac2026 submit ... --execute --yes --allow-add-file
 - Put cookies, HAR files, and captured headers under `taiji-output/secrets/` or `taiji-output/har/`. Never commit them.
 - All scripts write local artifacts under `taiji-output/` by default.
 - Relative output paths cannot contain `..`; use an absolute path when writing outside `taiji-output/` is intentional.
-- `submit-taiji.mjs` is dry-run by default.
+- `taac2026 train submit` is dry-run by default.
 - Platform mutations require explicit `--execute --yes`.
 - Starting training additionally requires explicit `--run`.
 - The script keeps the template Job's environment, image, and entrypoint; by default it strictly replaces existing `code.zip` and `config.yaml` trainFiles, strictly replaces matching `run.sh` only when `--run-sh` is provided, and strictly replaces generic trainFiles only when `--file` or `--file-dir` is provided.
@@ -327,9 +381,12 @@ taiji-output/
   jobs-summary.csv
   all-checkpoints.csv
   all-metrics-long.csv
+  eval-tasks.json
+  eval-tasks-summary.csv
   browser-profile/
   code/<jobId>/
   config-diffs/
+  eval-logs/<task_id>/
   logs/<jobId>/
   secrets/
   submit-bundle/
@@ -358,16 +415,33 @@ Poor fits:
 - Taiji APIs changed and you do not have a fresh DevTools request sample.
 - You want fully unattended consumption of training resources with no explicit confirmation.
 
+## Project Structure
+
+```
+src/
+├── api/                 # HTTP client, training API, evaluation API, COS upload
+├── auth/                # Cookie management, browser SSO login
+├── cli/
+│   ├── index.ts         # CLI entry point (program.parse)
+│   └── commands/        # train/ and eval/ subcommands
+├── config/              # Parameter defaults and resolution
+├── utils/               # Output path management, formatting
+├── scrape/              # Scraping logic
+└── types.ts             # Shared TypeScript types
+```
+
 ## Scripts
 
-| Script | Purpose |
+| Entry | Purpose |
 | --- | --- |
-| `bin/taac2026.mjs` / `taac2026` | Unified CLI entrypoint that dispatches to the subcommands below |
-| `scripts/scrape-taiji.mjs` | Scrape Jobs, instances, metrics, logs, checkpoints, and code files |
-| `scripts/compare-config-yaml.mjs` | Semantically compare two YAML configs |
-| `scripts/prepare-taiji-submit.mjs` | Prepare a local submit bundle and record Git state |
-| `scripts/submit-taiji.mjs` | Dry-run or explicitly execute upload, Job creation, and Run |
-| `scripts/experiment-tools.mjs` | Submit doctor, submit verify, Job comparison, ledger sync, and log diagnosis |
+| `bin/taac2026.mjs` | Unified CLI entrypoint, forwards to `dist/cli/index.js` |
+| `dist/cli/index.js` | TypeScript-compiled CLI entrypoint (actual `taac2026` command) |
+| `src/cli/commands/` | All train/eval subcommand TypeScript sources |
+| `scripts/scrape-taiji.mjs` | Legacy scrape script (compat; migrate to `taac2026 train list`) |
+| `scripts/compare-config-yaml.mjs` | Legacy config compare (compat; migrate to `taac2026 train config-diff`) |
+| `scripts/prepare-taiji-submit.mjs` | Legacy submit prepare (compat; migrate to `taac2026 train prepare`) |
+| `scripts/submit-taiji.mjs` | Legacy submit execute (compat; migrate to `taac2026 train submit`) |
+| `scripts/experiment-tools.mjs` | Legacy experiment tools (compat; migrate to matching `taac2026 train` subcommands) |
 
 ## Troubleshooting
 
@@ -380,8 +454,9 @@ Poor fits:
 ## Development Check
 
 ```bash
+npm run build
 npm run check
 npm run test
 ```
 
-`check` runs `node --check` on all bundled scripts. `test` runs small behavior tests for submit safety and output paths.
+`build` compiles TypeScript to `dist/`. `check` runs `node --check` on all bundled scripts. `test` runs small behavior tests for submit safety and output paths.

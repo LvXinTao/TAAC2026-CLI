@@ -59,7 +59,10 @@ export async function fetchJson<T = unknown>(
       if (isDirectClient(client)) {
         return await fetchDirect<T>(client, endpoint, { method, params: options.params, body: options.body });
       }
-      throw new Error("Browser mode requires a Playwright page object");
+      if (isPlaywrightPage(client)) {
+        return await fetchViaPage(client, endpoint, { method, params: options.params, body: options.body });
+      }
+      throw new Error("Unsupported client: expected DirectClient or Playwright page");
     } catch (error) {
       lastError = error instanceof Error ? error : new Error(String(error));
       if (attempt < maxRetries) {
@@ -131,4 +134,44 @@ async function fetchBinaryDirect(
     contentType: response.headers.get("content-type") ?? "",
     buffer: Buffer.from(await response.arrayBuffer()),
   };
+}
+
+function isPlaywrightPage(client: unknown): boolean {
+  const p = client as any;
+  return p && typeof p.evaluate === "function" && typeof p.url === "function";
+}
+
+async function fetchViaPage<T = unknown>(
+  page: any,
+  endpoint: string,
+  options: { method?: string; params?: Record<string, unknown>; body?: unknown }
+): Promise<T> {
+  const url = buildUrl(endpoint, options.params);
+  const method = options.method ?? "GET";
+  const body = method !== "GET" && options.body ? JSON.stringify(options.body) : undefined;
+
+  const result = await page.evaluate(
+    (ctx: { url: string; method: string; body: string | undefined }) =>
+      fetch(ctx.url, {
+        method,
+        headers: {
+          accept: "application/json, text/plain, */*",
+          ...(ctx.body ? { "content-type": "application/json" } : {}),
+        },
+        credentials: "include",
+        ...(ctx.body ? { body: ctx.body } : {}),
+      }).then(async (r) => {
+        const text = await r.text();
+        let json;
+        try { json = JSON.parse(text); } catch { json = text; }
+        return { ok: r.ok, status: r.status, body: json, text };
+      }),
+    { url, method, body },
+  );
+
+  if (!result.ok) {
+    throw new Error(`HTTP ${result.status}: ${String(result.text).slice(0, 500)}`);
+  }
+
+  return result.body as T;
 }

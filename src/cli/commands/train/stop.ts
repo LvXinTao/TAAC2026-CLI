@@ -1,5 +1,6 @@
 import { Command } from "commander";
 import { ensureAuthenticated } from "../../../auth/token.js";
+import { fetchJson } from "../../../api/client.js";
 
 export function registerTrainStopCommand(trainCmd: Command) {
   trainCmd
@@ -9,6 +10,16 @@ export function registerTrainStopCommand(trainCmd: Command) {
     .option("--cookie-file <file>", "Cookie file path")
     .action(async (opts) => {
       const client = await ensureAuthenticated(opts.cookieFile);
-      console.log(`Stop job ${opts.jobId} — API call not yet implemented`);
+      const jobId = opts.jobId;
+      console.log(`Stopping job ${jobId}…`);
+      try {
+        const response = await fetchJson(client, `/taskmanagement/api/v1/webtasks/external/task/${jobId}/stop`, {
+          method: "POST",
+        });
+        console.log(`Job ${jobId} stopped:`, JSON.stringify(response, null, 2));
+      } catch (error) {
+        console.error(`Failed to stop job ${jobId}:`, (error as Error).message);
+        process.exitCode = 1;
+      }
     });
 }

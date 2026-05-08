@@ -48,26 +48,16 @@ taac2026
 ├── train
 │   ├── prepare                        # 准备提交包
 │   ├── submit                         # 上传到 COS 并创建 Job
-│   ├── create                         # 创建 Job
-│   ├── run                            # 启动训练 instance
 │   ├── list                           # 抓取训练任务列表
 │   ├── logs                           # 获取实验日志
 │   ├── metrics                        # 获取实验指标
 │   ├── stop                           # 停止 Job
-│   ├── delete                         # 删除 Job
-│   ├── doctor                         # 提交前检查
-│   ├── verify                         # 提交后回读校验
-│   ├── compare                        # 跨实验对比
-│   ├── compare-runs                   # 对比 base vs exp
-│   ├── ckpt-select                    # checkpoint 候选
-│   ├── config-diff                    # config 语义对比
-│   ├── ledger                         # 同步实验账本
-│   └── diagnose                       # 诊断失败 Job
+│   └── delete                         # 删除 Job
 └── eval
-    ├── create                         # 创建评测任务
     ├── list                           # 抓取评测任务列表
     ├── logs                           # 查看评测日志
-    └── metrics                        # 查看评测指标
+    ├── metrics                        # 查看评测指标
+    └── create                         # 创建评测任务
 ```
 
 > **兼容性**：旧的 `taac2026 scrape`、`taac2026 diff-config` 等扁平命令仍然可用，但推荐迁移到新的 `taac2026 train list`、`taac2026 train config-diff` 等子命令。
@@ -117,11 +107,8 @@ taac2026
 | 保存任务详情 | `code/<jobId>/job-detail.json`、`train-files.json` |
 | 批量抓 Evaluation 任务 | `eval-tasks.json`、`eval-tasks-summary.csv` |
 | 抓评测 event log | `eval-logs/<task_id>.txt` |
-| 比较 config | `taiji-output/config-diffs/*.json` 或 Markdown |
 | 准备提交包 | `taiji-output/submit-bundle/` |
 | dry-run / live submit | `taiji-output/submit-live/<timestamp>/` |
-| 实验安全检查 / 回读校验 | `train doctor`、`train verify` |
-| 实验证据整理 | `train compare`、`train compare-runs`、`train config-diff`、`train ledger`、`train diagnose`、`train ckpt-select` |
 
 ## 快速开始
 
@@ -191,44 +178,17 @@ taac2026 train config-diff old-config.yaml new-config.yaml --json --out diff.jso
 
 ## 日常实验工具
 
-这些工具只整理证据和拦截低级错误，不替你决定哪个实验更值得提交。
-
-提交前检查 bundle：
+提交前检查 bundle 文件是否齐全：
 
 ```bash
-taac2026 train doctor --bundle taiji-output/submit-bundle
+ls taiji-output/submit-bundle/files/
 ```
 
-提交后回读平台文件，确认平台实际 `code.zip/config.yaml/run.sh` 和本地 bundle 一致：
-
-```bash
-taac2026 train verify --bundle taiji-output/submit-bundle --job-internal-id 56242 --cookie-file taiji-output/secrets/taiji-cookie.txt --direct
-```
-
-跨实验整理指标、描述里的人工 test 分、valid/test-like 曲线证据：
-
-```bash
-taac2026 train compare 56242 58244 --json
-```
-
-对比一个 base 和一个实验 Job，合并 config diff、best/final 指标差异、同向性和候选 checkpoint 规则结果：
-
-```bash
-taac2026 train compare-runs --base 58244 --exp 56242 --config --metrics --json
-```
-
-同步结构化实验账本，或诊断失败 Job：
-
-```bash
-taac2026 train ledger sync
-taac2026 train diagnose --job-internal-id 56242 --json
-```
-
-快速抽取错误日志，或按明确指标规则列出 checkpoint 候选：
+快速抽取错误日志，或查看某个 Job 的指标：
 
 ```bash
 taac2026 train logs --job 60414 --errors --tail 100
-taac2026 train ckpt-select --job 56242 --by valid_auc --json
+taac2026 train metrics --job 56242 --cookie-file taiji-output/secrets/taiji-cookie.txt --direct
 ```
 
 ## 自动提交训练
@@ -460,4 +420,4 @@ npm run check
 npm run test
 ```
 
-`build` 编译 TypeScript 到 `dist/`。`check` 会对所有 bundled scripts 执行 `node --check`；`test` 会跑提交安全和输出路径的小型行为测试。
+`build` 编译 TypeScript 到 `dist/`。`check` 会对所有 bundled scripts 执行 `node --check`；`test` 会跑 CLI 冒烟测试。

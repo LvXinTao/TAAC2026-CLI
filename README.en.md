@@ -48,26 +48,16 @@ taac2026
 ├── train
 │   ├── prepare                        # Prepare submit bundle
 │   ├── submit                         # Upload to COS and create Job
-│   ├── create                         # Create Job
-│   ├── run                            # Start training instance
 │   ├── list                           # Scrape training job list
 │   ├── logs                           # Get experiment logs
 │   ├── metrics                        # Get experiment metrics
 │   ├── stop                           # Stop Job
-│   ├── delete                         # Delete Job
-│   ├── doctor                         # Pre-submit check
-│   ├── verify                         # Post-submit read-back
-│   ├── compare                        # Cross-experiment comparison
-│   ├── compare-runs                   # Compare base vs experiment
-│   ├── ckpt-select                    # Checkpoint candidates
-│   ├── config-diff                    # Config semantic diff
-│   ├── ledger                         # Sync experiment ledger
-│   └── diagnose                       # Diagnose failed Job
+│   └── delete                         # Delete Job
 └── eval
-    ├── create                         # Create evaluation task
     ├── list                           # Scrape evaluation task list
     ├── logs                           # View evaluation logs
-    └── metrics                        # View evaluation metrics
+    ├── metrics                        # View evaluation metrics
+    └── create                         # Create evaluation task
 ```
 
 > **Compatibility**: Old flat commands like `taac2026 scrape` and `taac2026 diff-config` still work via the legacy `.mjs` scripts, but migrating to `taac2026 train list`, `taac2026 train config-diff`, etc. is recommended.
@@ -117,11 +107,8 @@ Most importantly, metrics should be compared by an agent across runs, not by hum
 | Save Job detail | `code/<jobId>/job-detail.json`, `train-files.json` |
 | Bulk scrape Evaluation tasks | `eval-tasks.json`, `eval-tasks-summary.csv` |
 | Scrape evaluation event log | `eval-logs/<task_id>.txt` |
-| Compare configs | `taiji-output/config-diffs/*.json` or Markdown |
 | Prepare submit bundle | `taiji-output/submit-bundle/` |
 | Dry-run / live submit | `taiji-output/submit-live/<timestamp>/` |
-| Submit safety / read-back verification | `train doctor`, `train verify` |
-| Experiment evidence tools | `train compare`, `train compare-runs`, `train config-diff`, `train ledger`, `train diagnose`, `train ckpt-select` |
 
 ## Quick Start
 
@@ -191,44 +178,17 @@ taac2026 train config-diff old-config.yaml new-config.yaml --json --out diff.jso
 
 ## Daily Experiment Tools
 
-These commands organize evidence and catch avoidable mistakes. They do not decide which experiment is best.
-
-Check a prepared bundle before submit:
+Check bundle files before submit:
 
 ```bash
-taac2026 train doctor --bundle taiji-output/submit-bundle
+ls taiji-output/submit-bundle/files/
 ```
 
-After submit, scrape the new Job and verify the platform-side `code.zip/config.yaml/run.sh` against the local bundle:
-
-```bash
-taac2026 train verify --bundle taiji-output/submit-bundle --job-internal-id 56242 --cookie-file taiji-output/secrets/taiji-cookie.txt --direct
-```
-
-Compare multiple Jobs as an evidence table with metrics, manually recorded test scores, and curve summaries:
-
-```bash
-taac2026 train compare 56242 58244 --json
-```
-
-Compare one base Job against one experiment Job with config diff, best/final metric deltas, direction checks, and checkpoint candidates by explicit rule:
-
-```bash
-taac2026 train compare-runs --base 58244 --exp 56242 --config --metrics --json
-```
-
-Sync a structured experiment ledger, or extract diagnosis evidence from a failed Job:
-
-```bash
-taac2026 train ledger sync
-taac2026 train diagnose --job-internal-id 56242 --json
-```
-
-Extract error logs quickly, or list checkpoint candidates by an explicit metric rule:
+Extract error logs quickly, or view metrics for a specific Job:
 
 ```bash
 taac2026 train logs --job 60414 --errors --tail 100
-taac2026 train ckpt-select --job 56242 --by valid_auc --json
+taac2026 train metrics --job 56242 --cookie-file taiji-output/secrets/taiji-cookie.txt --direct
 ```
 
 ## Submit Training
@@ -459,4 +419,4 @@ npm run check
 npm run test
 ```
 
-`build` compiles TypeScript to `dist/`. `check` runs `node --check` on all bundled scripts. `test` runs small behavior tests for submit safety and output paths.
+`build` compiles TypeScript to `dist/`. `check` runs `node --check` on all bundled scripts. `test` runs CLI smoke tests.

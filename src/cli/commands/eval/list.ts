@@ -19,7 +19,7 @@ export function registerEvalListCommand(evalCmd: Command) {
       const tasks = await fetchEvaluationTasks(client, opts.pageSize ?? 100);
       console.log(`Found ${tasks.length} evaluation tasks`);
 
-      const evalLogDir = path.join(outDir, "eval-logs");
+      const evalLogDir = path.join(outDir, "eval-jobs", "logs");
       await mkdir(evalLogDir, { recursive: true });
 
       const tasksById: Record<string, Record<string, unknown>> = {};
@@ -33,7 +33,7 @@ export function registerEvalListCommand(evalCmd: Command) {
           await writeFile(path.join(evalLogDir, `${taskId}.json`), JSON.stringify(logList, null, 2), "utf8");
           const textLines = (logList as Record<string, string>[]).map((entry) => `[${entry.time}] ${entry.message}`).join("\n");
           await writeFile(path.join(evalLogDir, `${taskId}.txt`), textLines, "utf8");
-          tasksById[taskId].log = { entries: logList.length, path: `eval-logs/${taskId}.txt` };
+          tasksById[taskId].log = { entries: logList.length, path: `eval-jobs/logs/${taskId}.txt` };
         } catch (error) {
           tasksById[taskId].log = { error: String(error) };
         }

@@ -6,12 +6,12 @@ export function registerTrainDeleteCommand(trainCmd: Command) {
   trainCmd
     .command("delete")
     .description("Delete a training job")
-    .requiredOption("--job-id <id>", "Job internal ID to delete")
+    .requiredOption("--job-internal-id <id>", "Job internal ID to delete (numeric)")
     .option("--yes", "Skip confirmation prompt", false)
     .action(async (opts) => {
       const cookieHeader = await ensureCliAuth();
       const client = { directCookieHeader: cookieHeader };
-      const jobId = opts.jobId;
+      const jobId = opts.jobInternalId;
 
       if (!opts.yes) {
         process.stdout.write(`Are you sure you want to delete job ${jobId}? [y/N] `);

@@ -6,11 +6,11 @@ export function registerTrainStopCommand(trainCmd: Command) {
   trainCmd
     .command("stop")
     .description("Stop a training job")
-    .requiredOption("--job-id <id>", "Job internal ID to stop")
+    .requiredOption("--job-internal-id <id>", "Job internal ID to stop (numeric)")
     .action(async (opts) => {
       const cookieHeader = await ensureCliAuth();
       const client = { directCookieHeader: cookieHeader };
-      const jobId = opts.jobId;
+      const jobId = opts.jobInternalId;
       console.log(`Stopping job ${jobId}…`);
       try {
         const response = await fetchJson(client, `/taskmanagement/api/v1/webtasks/external/task/${jobId}/stop`, {

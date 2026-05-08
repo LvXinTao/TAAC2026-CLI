@@ -10,10 +10,10 @@ export function registerTrainLogsCommand(trainCmd: Command) {
   trainCmd
     .command("logs")
     .description("Get training job logs")
-    .requiredOption("--job-id <id>", "Job internal ID")
-    .option("--output <dir>", "Output directory (default: taiji-output)")
+    .requiredOption("--job-id <id>", "Job ID (taskID string)")
+    .option("--output <dir>", "Output directory (default: taiji-output/train-jobs)")
     .action(async (opts) => {
-      const outDir = resolveTaijiOutputDir(opts.output ?? "taiji-output");
+      const outDir = resolveTaijiOutputDir(opts.output ?? "taiji-output/train-jobs");
       const cookieHeader = await ensureCliAuth();
       const client = { directCookieHeader: cookieHeader };
 

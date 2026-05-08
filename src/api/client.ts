@@ -79,15 +79,29 @@ async function fetchDirect<T = unknown>(
   endpoint: string,
   options: { method?: string; params?: Record<string, unknown>; body?: unknown }
 ): Promise<T> {
-  const url = buildUrl(endpoint, options.params);
   const method = options.method ?? "GET";
   const headers = buildHeaders(client.directCookieHeader);
-  const requestInit: RequestInit = { method, headers };
 
-  if (method !== "GET" && options.body) {
-    headers["content-type"] = "application/json";
-    requestInit.body = JSON.stringify(options.body);
+  // For POST requests, params go into the body, not URL query string
+  let url: string;
+  let requestBody: string | undefined;
+  if (method === "POST") {
+    url = buildUrl(endpoint);
+    const data = options.body ?? options.params;
+    if (data) {
+      headers["content-type"] = "application/json";
+      requestBody = JSON.stringify(data);
+    }
+  } else {
+    url = buildUrl(endpoint, options.params);
+    if (method !== "GET" && options.body) {
+      headers["content-type"] = "application/json";
+      requestBody = JSON.stringify(options.body);
+    }
   }
+
+  const requestInit: RequestInit = { method, headers };
+  if (requestBody) requestInit.body = requestBody;
 
   const response = await fetch(url, requestInit);
   const text = await response.text();
@@ -141,37 +155,76 @@ function isPlaywrightPage(client: unknown): boolean {
   return p && typeof p.evaluate === "function" && typeof p.url === "function";
 }
 
+async function parseResponse<T>(response: any): Promise<T> {
+  const text = await response.text();
+  let body: T;
+  try {
+    body = JSON.parse(text);
+  } catch {
+    body = text as T;
+  }
+  if (!response.ok()) {
+    throw new Error(`HTTP ${response.status()}: ${text.slice(0, 500)}`);
+  }
+  return body;
+}
+
 async function fetchViaPage<T = unknown>(
   page: any,
   endpoint: string,
   options: { method?: string; params?: Record<string, unknown>; body?: unknown }
 ): Promise<T> {
-  const url = buildUrl(endpoint, options.params);
   const method = options.method ?? "GET";
-  const body = method !== "GET" && options.body ? JSON.stringify(options.body) : undefined;
+  const headers: Record<string, string> = {
+    accept: "application/json, text/plain, */*",
+  };
 
-  const result = await page.evaluate(
-    (ctx: { url: string; method: string; body: string | undefined }) =>
-      fetch(ctx.url, {
-        method,
-        headers: {
-          accept: "application/json, text/plain, */*",
-          ...(ctx.body ? { "content-type": "application/json" } : {}),
-        },
-        credentials: "include",
-        ...(ctx.body ? { body: ctx.body } : {}),
-      }).then(async (r) => {
-        const text = await r.text();
-        let json;
-        try { json = JSON.parse(text); } catch { json = text; }
-        return { ok: r.ok, status: r.status, body: json, text };
-      }),
-    { url, method, body },
-  );
-
-  if (!result.ok) {
-    throw new Error(`HTTP ${result.status}: ${String(result.text).slice(0, 500)}`);
+  // For POST requests, params go into the body, not URL query string
+  let url: string;
+  if (method === "POST") {
+    url = buildUrl(endpoint);
+    const data = options.body ?? options.params;
+    if (data) {
+      headers["content-type"] = "application/json";
+      const requestOptions = { headers, data: typeof data === "string" ? data : JSON.stringify(data) };
+      const response = await page.request.post(url, requestOptions);
+      return parseResponse(response);
+    }
+  }
+  url = buildUrl(endpoint, options.params);
+  if (method !== "GET" && options.body) {
+    headers["content-type"] = "application/json";
   }
 
-  return result.body as T;
+  const requestOptions: any = { headers };
+  if (method !== "GET" && options.body) {
+    requestOptions.data = JSON.stringify(options.body);
+  }
+
+  let response: any;
+  if (method === "GET") {
+    response = await page.request.get(url, requestOptions);
+  } else if (method === "POST") {
+    response = await page.request.post(url, requestOptions);
+  } else if (method === "PUT") {
+    response = await page.request.put(url, requestOptions);
+  } else if (method === "DELETE") {
+    response = await page.request.delete(url, requestOptions);
+  } else {
+    throw new Error(`Unsupported HTTP method: ${method}`);
+  }
+
+  const text = await response.text();
+  let body: T;
+  try {
+    body = JSON.parse(text);
+  } catch {
+    body = text as T;
+  }
+
+  if (!response.ok()) {
+    throw new Error(`HTTP ${response.status()}: ${text.slice(0, 500)}`);
+  }
+
+  return body;
 }

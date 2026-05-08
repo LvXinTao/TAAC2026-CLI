@@ -10,11 +10,11 @@ export function registerTrainMetricsCommand(trainCmd: Command) {
   trainCmd
     .command("metrics")
     .description("Get training job metrics")
-    .requiredOption("--job-id <id>", "Job internal ID")
+    .requiredOption("--job-id <id>", "Job ID (taskID string)")
     .option("--json", "Output JSON to stdout instead of CSV file")
-    .option("--output <dir>", "Output directory (default: taiji-output)")
+    .option("--output <dir>", "Output directory (default: taiji-output/train-jobs/metrics)")
     .action(async (opts) => {
-      const outDir = resolveTaijiOutputDir(opts.output ?? "taiji-output");
+      const outDir = resolveTaijiOutputDir(opts.output ?? "taiji-output/train-jobs/metrics");
       const cookieHeader = await ensureCliAuth();
       const client = { directCookieHeader: cookieHeader };
 

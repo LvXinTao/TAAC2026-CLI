@@ -2,7 +2,9 @@ import { Command } from "commander";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { createBrowserContext, waitForLogin, DEFAULTS as BROWSER_DEFAULTS } from "../../../auth/browser.js";
+import { parseCookieEntries } from "../../../auth/token.js";
 import { fetchTrainingJobs } from "../../../api/training.js";
+import { resolveSecretPath } from "../../../cli/middleware.js";
 import { resolveTaijiOutputDir } from "../../../utils/output.js";
 import { toCsv } from "../../../utils/format.js";
 
@@ -28,6 +30,27 @@ export function registerTrainListCommand(trainCmd: any) {
       const userDataDir = path.resolve(outDir, "browser-profile");
       const context = await createBrowserContext(userDataDir, opts.headless ?? false);
       try {
+        // In headless mode, inject saved cookie since there's no interactive login
+        if (opts.headless) {
+          const secretPath = resolveSecretPath();
+          try {
+            const cookieHeader = (await readFile(secretPath, "utf8")).trim();
+            const cookies = parseCookieEntries(cookieHeader);
+            if (cookies.length > 0) {
+              await context.addCookies(
+                cookies.map((c) => ({
+                  name: c.name,
+                  value: c.value,
+                  domain: "taiji.algo.qq.com",
+                  path: "/",
+                }))
+              );
+            }
+          } catch {
+            // No saved cookie found — will rely on interactive login
+          }
+        }
+
         const page = context.pages()[0] ?? (await context.newPage());
         await waitForLogin(page, TRAINING_URL, timeoutMs, ["Model Training Job", "模型训练任务", "Job ID", "任务ID"]);
 

@@ -4,7 +4,7 @@ import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { createRequire } from "node:module";
-import { ensureAuthenticated, createDirectClient } from "../../../auth/token.js";
+import { ensureCliAuth } from "../../../cli/middleware.js";
 import { resolveTaijiOutputDir } from "../../../utils/output.js";
 
 const require = createRequire(import.meta.url);
@@ -13,15 +13,6 @@ const COS = require("cos-nodejs-sdk-v5");
 const BUCKET = "hunyuan-external-1258344706";
 const REGION = "ap-guangzhou";
 const TAIJI_ORIGIN = "https://taiji.algo.qq.com";
-
-function extractCookieHeader(fileContent: string): string {
-  const text = fileContent.trim();
-  const headerLine = text.match(/^cookie:\s*(.+)$/im);
-  if (headerLine) return headerLine[1].trim();
-  const curlHeader = text.match(/(?:-H|--header)\s+(['"])cookie:\s*([\s\S]*?)\1/i);
-  if (curlHeader) return curlHeader[2].trim();
-  return text.replace(/^cookie:\s*/i, "").trim();
-}
 
 function inferInternalId(url: string): string {
   if (!url) return "";
@@ -132,7 +123,6 @@ async function uploadToCos(cookieHeader: string, localPath: string, key: string,
 function replaceTrainFiles(
   templateFiles: Array<Record<string, string>>,
   uploaded: Array<Record<string, unknown>>,
-  options: { allowAddFile?: boolean } = {},
 ) {
   const byName = new Map(uploaded.map((f) => [f.name, f]));
   const next: Array<Record<string, unknown>> = [];
@@ -142,10 +132,9 @@ function replaceTrainFiles(
     else { next.push(file); }
   }
   const missing = uploaded.filter((f: Record<string, unknown>) => !matchedNames.has(f.name as string));
-  if (missing.length && !options.allowAddFile) {
+  if (missing.length) {
     throw new Error(`Template trainFiles does not contain required file: ${missing.map((f) => f.name).join(", ")}`);
   }
-  if (options.allowAddFile) { for (const f of missing) next.push(f); }
   return next;
 }
 
@@ -153,13 +142,12 @@ function buildTaskPayload(
   templateData: Record<string, unknown>,
   job: { name: string; description: string },
   uploadedTrainFiles: Array<Record<string, unknown>>,
-  options: { allowAddFile?: boolean } = {},
 ) {
   return {
     ...templateData,
     name: job.name,
     description: job.description,
-    trainFiles: replaceTrainFiles((templateData.trainFiles as Array<Record<string, string>>) || [], uploadedTrainFiles, options),
+    trainFiles: replaceTrainFiles((templateData.trainFiles as Array<Record<string, string>>) || [], uploadedTrainFiles),
   };
 }
 
@@ -175,29 +163,29 @@ export function registerTrainSubmitCommand(trainCmd: Command) {
     .command("submit")
     .description("Upload bundle to COS and create job")
     .requiredOption("--bundle <dir>", "Prepared bundle directory")
-    .option("--cookie-file <file>", "Cookie file path")
-    .option("--template-job-internal-id <id>", "Numeric template job ID")
-    .option("--template-job-url <url>", "Template job URL")
-    .option("--name <name>", "Override job name from manifest")
-    .option("--description <text>", "Override job description")
-    .option("--execute", "Actually upload and create job (default: dry-run)", false)
     .option("--run", "Start job after creation", false)
-    .option("--yes", "Required with --execute", false)
-    .option("--allow-add-file", "Allow uploaded files absent from template trainFiles", false)
-    .option("--out <dir>", "Output directory")
+    .option("--yes", "Skip confirmation prompt", false)
+    .option("--dry-run", "Preview without uploading", false)
+    .option("--output <dir>", "Output directory for plan/result")
     .action(async (opts) => {
       const bundleDir = path.resolve(opts.bundle);
       const defaultOut = path.join("submit-live", new Date().toISOString().replace(/[:.]/g, "-"));
-      const outDir = resolveTaijiOutputDir(opts.out ?? defaultOut);
+      const outDir = resolveTaijiOutputDir(opts.output ?? defaultOut);
       const { manifest, codeZip, config, runSh, genericFiles } = await loadBundle(bundleDir);
-      const templateJobUrl = (opts.templateJobUrl || manifest.templateJobUrl) as string;
-      const templateJobInternalId = opts.templateJobInternalId || inferInternalId(templateJobUrl);
-      if (!templateJobInternalId) throw new Error("Missing --template-job-internal-id, and it could not be inferred");
-      const jobName = (opts.name || ((manifest.job as Record<string, string> | undefined)?.name)) as string;
-      if (!jobName) throw new Error("Missing --name and bundle manifest has no job.name");
-      const jobDescription = (opts.description ?? ((manifest.job as Record<string, string> | undefined)?.description ?? "")) as string;
+
+      // Template info from manifest only
+      const templateJobUrl = manifest.templateJobUrl as string;
+      const templateJobInternalId = inferInternalId(templateJobUrl);
+      if (!templateJobInternalId) throw new Error("Cannot determine template job ID from manifest. Run `prepare` again with a valid `--template-id`.");
+
+      // Job name/description from manifest only
+      const jobRecord = (manifest.job as Record<string, string> | undefined) ?? {};
+      const jobName = jobRecord.name;
+      if (!jobName) throw new Error("Missing job.name in bundle manifest. Run `prepare` again with a valid `--name`.");
+      const jobDescription = jobRecord.description ?? "";
       const job = { name: jobName, description: jobDescription };
 
+      // File metadata
       const [zipMeta, configMeta, runShMeta, genericFileMetas] = await Promise.all([
         codeZip ? fileMeta(codeZip) : null,
         config ? fileMeta(config) : null,
@@ -205,11 +193,17 @@ export function registerTrainSubmitCommand(trainCmd: Command) {
         Promise.all(genericFiles.map(async (f) => ({ ...f, ...(await fileMeta(f.path)) }))),
       ]);
 
+      const mode = opts.dryRun ? "dry-run" : "execute";
+
+      // Safety check: require --yes for live execution
+      if (!opts.dryRun && !opts.yes) {
+        throw new Error("--dry-run is not set; add --yes to confirm live execution");
+      }
+
       const plan = {
-        mode: opts.execute ? "execute" : "dry-run",
+        mode,
         templateJobUrl, templateJobInternalId,
-        runAfterSubmit: Boolean(opts.run || manifest.runAfterSubmit),
-        allowAddFile: Boolean(opts.allowAddFile),
+        runAfterSubmit: Boolean(opts.run),
         job,
         files: {
           ...(codeZip ? { codeZip: { path: codeZip, ...zipMeta } } : {}),
@@ -219,16 +213,11 @@ export function registerTrainSubmitCommand(trainCmd: Command) {
         },
       };
 
-      if (opts.execute && !opts.yes) throw new Error("--execute requires --yes");
-      if (!opts.cookieFile) {
-        await mkdir(outDir, { recursive: true });
-        await writeFile(path.join(outDir, "plan.json"), `${JSON.stringify(plan, null, 2)}\n`, "utf8");
-        console.log(`Wrote dry-run plan without network: ${path.join(outDir, "plan.json")}`);
-        return;
-      }
+      // Auth
+      const cookieHeader = await ensureCliAuth();
+      const client = { directCookieHeader: cookieHeader };
 
-      const client = await createDirectClient(opts.cookieFile);
-      const cookieHeader = extractCookieHeader(await readFile(opts.cookieFile, "utf8"));
+      // Fetch template and build payload
       const template = await fetchJson(cookieHeader, `/taskmanagement/api/v1/webtasks/external/task/${templateJobInternalId}`);
       const templateData = template.data as Record<string, unknown>;
       if (!(templateData as Record<string, unknown> | undefined)?.trainFiles) throw new Error("Template has no data.trainFiles");
@@ -251,18 +240,20 @@ export function registerTrainSubmitCommand(trainCmd: Command) {
         ...(runSh ? [{ name: "run.sh", path: newCosKey(fullCosPrefix, runShMeta!.basename), mtime: formatTaijiTime(), size: runShMeta!.bytes }] : []),
         ...genericFileMetas.map((f) => ({ name: f.name, path: newCosKey(fullCosPrefix, f.name), mtime: formatTaijiTime(), size: f.bytes })),
       ];
-      const taskPayload = buildTaskPayload(templateData, job, uploadedTrainFiles, { allowAddFile: opts.allowAddFile });
+      const taskPayload = buildTaskPayload(templateData, job, uploadedTrainFiles);
       const networkPlan = { ...plan, cosPrefix, uploadedTrainFiles, taskPayloadPreview: safeResult(taskPayload) };
 
+      // Write plan.json
       await mkdir(outDir, { recursive: true });
       await writeFile(path.join(outDir, "plan.json"), `${JSON.stringify(networkPlan, null, 2)}\n`, "utf8");
 
-      if (!opts.execute) {
+      if (opts.dryRun) {
         console.log(`Wrote dry-run plan: ${path.join(outDir, "plan.json")}`);
-        console.log("No upload/create/start happened. Add --execute --yes to run live.");
+        console.log("No upload/create/start happened. Remove --dry-run and add --yes to run live.");
         return;
       }
 
+      // Execute live
       const uploadResults: Array<{ key: string; bytes: number }> = [];
       if (codeZip) uploadResults.push(await uploadToCos(cookieHeader, codeZip, codeKey!, "application/x-zip-compressed"));
       if (config) uploadResults.push(await uploadToCos(cookieHeader, config, configKey!, ""));
@@ -280,7 +271,7 @@ export function registerTrainSubmitCommand(trainCmd: Command) {
       if (!taskId) throw new Error("Created task response has no data.taskId");
 
       let startResponse = null;
-      if (opts.run || manifest.runAfterSubmit) {
+      if (opts.run) {
         startResponse = await fetchJson(cookieHeader, `/taskmanagement/api/v1/webtasks/${taskId}/start`, { method: "POST", body: {} });
       }
       const instances = await fetchJson(cookieHeader, "/taskmanagement/api/v1/instances/list", {

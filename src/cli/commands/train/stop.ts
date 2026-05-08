@@ -1,5 +1,5 @@
 import { Command } from "commander";
-import { ensureAuthenticated } from "../../../auth/token.js";
+import { ensureCliAuth } from "../../../cli/middleware.js";
 import { fetchJson } from "../../../api/client.js";
 
 export function registerTrainStopCommand(trainCmd: Command) {
@@ -7,9 +7,9 @@ export function registerTrainStopCommand(trainCmd: Command) {
     .command("stop")
     .description("Stop a training job")
     .requiredOption("--job-id <id>", "Job internal ID to stop")
-    .option("--cookie-file <file>", "Cookie file path")
     .action(async (opts) => {
-      const client = await ensureAuthenticated(opts.cookieFile);
+      const cookieHeader = await ensureCliAuth();
+      const client = { directCookieHeader: cookieHeader };
       const jobId = opts.jobId;
       console.log(`Stopping job ${jobId}…`);
       try {

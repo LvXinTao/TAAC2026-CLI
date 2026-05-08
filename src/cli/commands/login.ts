@@ -17,14 +17,26 @@ async function saveCookie(cookieHeader: string): Promise<string> {
   return cookiePath;
 }
 
-async function loginWithBrowser(headless: boolean, timeout: number) {
+async function loginWithBrowser(timeout: number) {
   const userDataDir = path.join(tmpdir(), `taac2026-login-${Date.now()}`);
-  try {
-    const browser = await chromium.launchPersistentContext(userDataDir, {
-      headless,
+  const launchChrome = async (channel?: string) =>
+    chromium.launchPersistentContext(userDataDir, {
+      channel,
+      headless: false,
       args: ["--disable-features=CookieDeprecationMessages"],
     });
 
+  let browser: Awaited<ReturnType<typeof chromium.launchPersistentContext>>;
+  try {
+    // Try real Chrome first (better fingerprint), fall back to bundled Chromium
+    browser = await launchChrome("chrome");
+    console.log("Using installed Chrome for login…");
+  } catch {
+    browser = await launchChrome();
+    console.log("Chrome not found, using bundled Chromium…");
+  }
+
+  try {
     const loginUrl = `${TAIJI_ORIGIN}/training/create`;
     console.log(`Navigating to ${loginUrl} — please log in...`);
     await browser.pages()[0].goto(loginUrl, { timeout });
@@ -71,6 +83,6 @@ export function registerLoginCommand(program: Command) {
     .description("Browser SSO login, save cookie to .taac2026/secrets/")
     .option("--timeout <ms>", "Login timeout in ms", (v) => parseInt(v, 10), 120000)
     .action(async (opts) => {
-      await loginWithBrowser(false, opts.timeout);
+      await loginWithBrowser(opts.timeout);
     });
 }

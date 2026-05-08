@@ -2,15 +2,20 @@
 
 TAAC2026 / Taiji 实验平台的命令行工具，用于管理训练任务（train）和评估任务（eval）。
 
-## 认证
-
-所有命令均需要登录认证。首次使用前请先执行：
+## 安装
 
 ```bash
-taac2026 login
+npm install
+npm link
 ```
 
-该命令会启动浏览器登录 Taiji 平台，获取 Cookie 并保存到 `.taac2026/secrets/taiji-cookie.txt`。后续命令自动从该文件读取认证信息。
+安装完成后即可使用 `taac2026` 命令。
+
+## 认证
+
+所有命令均需要 Cookie 认证。使用前请先手动保存：
+
+将 Taiji 平台的 Cookie 保存为 `.taac2026/secrets/taiji-cookie.txt` 文件，后续命令会自动读取该文件进行认证。
 
 ---
 
@@ -147,24 +152,20 @@ taac2026 train run \
 
 ```bash
 taac2026 train list \
-  [--headless] \
   [--incremental] \
   [--page-size <n>] \
-  [--output <输出目录>] \
-  [--timeout <ms>]
+  [--output <输出目录>]
 ```
 
 | 参数 | 必填 | 说明 |
 |------|------|------|
-| `--headless` | 否 | 无头浏览器模式（适合 CI/CD） |
 | `--incremental` | 否 | 增量模式，跳过未变更的已结束任务 |
 | `--page-size` | 否 | 每页条数，默认 100 |
 | `--output` | 否 | 输出目录，默认 `taiji-output` |
-| `--timeout` | 否 | 浏览器超时时间（毫秒），默认 180000 |
 
 **调用的 API：**
 
-- `GET /taskmanagement/api/v1/webtasks/external/task` — 分页获取训练任务列表（需通过浏览器认证）
+- `GET /taskmanagement/api/v1/webtasks/external/task` — 分页获取训练任务列表（需通过 Cookie 认证）
 
 **产出文件：**
 

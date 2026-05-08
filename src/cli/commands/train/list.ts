@@ -1,7 +1,7 @@
 import { Command } from "commander";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { createBrowserContext, waitForLogin, DEFAULTS as BROWSER_DEFAULTS } from "../../../auth/browser.js";
+import { createBrowserContext, DEFAULTS as BROWSER_DEFAULTS } from "../../../auth/browser.js";
 import { parseCookieEntries } from "../../../auth/token.js";
 import { fetchTrainingJobs } from "../../../api/training.js";
 import { resolveSecretPath } from "../../../cli/middleware.js";
@@ -9,52 +9,42 @@ import { resolveTaijiOutputDir } from "../../../utils/output.js";
 import { toCsv } from "../../../utils/format.js";
 
 const TRAINING_URL = "https://taiji.algo.qq.com/training";
-const DEFAULT_API_AUTH_WAIT_MS = 180_000;
 
 export function registerTrainListCommand(trainCmd: any) {
   trainCmd
     .command("list")
     .description("List training job summaries")
-    .option("--headless", "Headless browser mode (for CI/CD)")
     .option("--incremental", "Skip unchanged terminal jobs")
     .option("--page-size <n>", "Page size", (v: string) => parseInt(v, 10))
     .option("--output <dir>", "Output directory (default: taiji-output)")
-    .option("--timeout <ms>", "Browser timeout in ms", (v: string) => parseInt(v, 10))
     .action(async (opts: any) => {
       const outDir = resolveTaijiOutputDir(opts.output ?? "taiji-output");
       await mkdir(outDir, { recursive: true });
       const pageSize = opts.pageSize ?? 100;
-      const timeoutMs = opts.timeout ?? BROWSER_DEFAULTS.TIMEOUT_MS;
-      const authTimeoutMs = Math.max(timeoutMs, DEFAULT_API_AUTH_WAIT_MS);
 
       const userDataDir = path.resolve(outDir, "browser-profile");
-      const context = await createBrowserContext(userDataDir, opts.headless ?? false);
+      const context = await createBrowserContext(userDataDir, true);
       try {
-        // In headless mode, inject saved cookie since there's no interactive login
-        if (opts.headless) {
-          const secretPath = resolveSecretPath();
-          try {
-            const cookieHeader = (await readFile(secretPath, "utf8")).trim();
-            const cookies = parseCookieEntries(cookieHeader);
-            if (cookies.length > 0) {
-              await context.addCookies(
-                cookies.map((c) => ({
-                  name: c.name,
-                  value: c.value,
-                  domain: "taiji.algo.qq.com",
-                  path: "/",
-                }))
-              );
-            }
-          } catch {
-            // No saved cookie found — will rely on interactive login
-          }
+        // Inject cookie from secrets file
+        const secretPath = resolveSecretPath();
+        const cookieHeader = (await readFile(secretPath, "utf8")).trim();
+        const cookies = parseCookieEntries(cookieHeader);
+        if (cookies.length === 0) {
+          throw new Error(`No valid cookies found in ${secretPath}. Please save your Taiji cookie to this file.`);
         }
+        await context.addCookies(
+          cookies.map((c) => ({
+            name: c.name,
+            value: c.value,
+            domain: "taiji.algo.qq.com",
+            path: "/",
+          }))
+        );
 
         const page = context.pages()[0] ?? (await context.newPage());
-        await waitForLogin(page, TRAINING_URL, timeoutMs, ["Model Training Job", "模型训练任务", "Job ID", "任务ID"]);
+        await page.goto(TRAINING_URL, { waitUntil: "domcontentloaded", timeout: BROWSER_DEFAULTS.TIMEOUT_MS });
 
-        const listedJobs = await fetchTrainingJobs(page, pageSize, authTimeoutMs);
+        const listedJobs = await fetchTrainingJobs(page, pageSize, BROWSER_DEFAULTS.AUTH_WAIT_MS);
 
         // --incremental: merge with existing jobs.json, skip unchanged terminal jobs
         const jobsFile = path.join(outDir, "jobs.json");

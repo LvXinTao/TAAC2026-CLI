@@ -10,7 +10,7 @@ import { registerTrainRunCommand } from "./run.js";
 import { registerTrainSubmitCommand } from "./submit.js";
 
 export function registerTrainCommand(program: Command) {
-  const trainCmd = program.command("train").description("Manage training tasks");
+  const trainCmd = program.command("train").description("Manage training tasks. Typical workflow: prepare -> submit -> run");
   registerTrainPrepareCommand(trainCmd);
   registerTrainSubmitCommand(trainCmd);
   registerTrainRunCommand(trainCmd);

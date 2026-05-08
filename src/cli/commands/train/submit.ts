@@ -1,5 +1,5 @@
 import { Command } from "commander";
-import { createReadStream } from "node:fs";
+import { createReadStream, existsSync, readFileSync } from "node:fs";
 import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
@@ -13,17 +13,6 @@ const COS = require("cos-nodejs-sdk-v5");
 const BUCKET = "hunyuan-external-1258344706";
 const REGION = "ap-guangzhou";
 const TAIJI_ORIGIN = "https://taiji.algo.qq.com";
-
-function inferInternalId(url: string): string {
-  if (!url) return "";
-  try {
-    const parsed = new URL(url);
-    const numericParts = parsed.pathname.split("/").filter((p) => /^\d{4,}$/.test(p));
-    return numericParts[0] || "";
-  } catch {
-    return "";
-  }
-}
 
 function taijiHeaders(cookieHeader: string) {
   return {
@@ -49,19 +38,48 @@ async function fetchJson(cookieHeader: string, endpoint: string, options?: { met
 
 async function loadBundle(bundleDir: string) {
   const manifest = JSON.parse(await readFile(path.join(bundleDir, "manifest.json"), "utf8")) as Record<string, unknown>;
-  const files = manifest.files as Record<string, unknown>;
-  const codeZip = (files.codeZip as { preparedPath?: string } | undefined)?.preparedPath ? path.resolve(bundleDir, (files.codeZip as { preparedPath: string }).preparedPath) : null;
-  const config = (files.config as { preparedPath?: string } | undefined)?.preparedPath ? path.resolve(bundleDir, (files.config as { preparedPath: string }).preparedPath) : null;
-  const runSh = (files.runSh as { preparedPath?: string } | undefined)?.preparedPath ? path.resolve(bundleDir, (files.runSh as { preparedPath: string }).preparedPath) : null;
-  const genericFiles = ((files.genericFiles as Array<{ name: string; preparedPath: string }> | undefined) ?? []).map((f) => ({
-    name: f.name, path: path.resolve(bundleDir, f.preparedPath),
+  const files = manifest.files as Array<Record<string, string>> | undefined;
+  if (!files || !Array.isArray(files)) {
+    throw new Error("Invalid manifest: expected 'files' to be an array. Re-run `prepare` with the updated version.");
+  }
+  const entries = files.map((f) => ({
+    name: f.name,
+    localPath: path.resolve(bundleDir, f.preparedPath),
+    isPrimary: f.isPrimary === "true",
   }));
-  return { manifest, codeZip, config, runSh, genericFiles };
+  return { manifest, files: entries };
 }
 
-async function fileMeta(filePath: string) {
-  const s = await stat(filePath);
-  return { bytes: s.size, basename: path.basename(filePath) };
+function findTaijiOutputDir(fromDir: string): string | null {
+  let current = fromDir;
+  while (true) {
+    if (existsSync(path.join(current, "jobs.json"))) return current;
+    const parent = path.dirname(current);
+    if (parent === current) break;
+    current = parent;
+  }
+  return null;
+}
+
+function resolveTemplateInternalId(manifest: Record<string, unknown>, bundleDir: string): string {
+  const templateJobUrl = manifest.templateJobUrl as string | undefined;
+  if (templateJobUrl) {
+    const numericParts = new URL(templateJobUrl, TAIJI_ORIGIN).pathname.split("/").filter((p) => /^\d{4,}$/.test(p));
+    if (numericParts[0]) return numericParts[0];
+  }
+
+  const templateJobId = manifest.templateJobId as string | undefined;
+  if (!templateJobId) return "";
+  if (/^\d+$/.test(templateJobId)) return templateJobId;
+
+  const taijiOutputDir = findTaijiOutputDir(bundleDir);
+  if (!taijiOutputDir) return "";
+  try {
+    const jobsData = JSON.parse(readFileSync(path.join(taijiOutputDir, "jobs.json"), "utf8"));
+    const entry = jobsData.jobsById?.[templateJobId];
+    if (entry?.jobInternalId) return String(entry.jobInternalId);
+  } catch { /* not available */ }
+  return "";
 }
 
 function formatTaijiTime(date = new Date()): string {
@@ -71,23 +89,25 @@ function formatTaijiTime(date = new Date()): string {
   return `${bj.getFullYear()}-${pad(bj.getMonth() + 1)}-${pad(bj.getDate())} ${pad(bj.getHours())}:${pad(bj.getMinutes())}:${pad(bj.getSeconds())}`;
 }
 
-function inferCosPrefix(trainFiles: Array<{ path: string }>): string {
-  for (const file of trainFiles || []) {
-    const match = String(file.path || "").match(/^(.+?)\/(?:common\/)?(?:train|template)\//);
+function inferCosPrefix(templateFiles: Array<{ path: string }>): string {
+  for (const file of templateFiles) {
+    const match = file.path.match(/^(.+?)\/(?:common\/)?(?:train|template)\//);
     if (match) return match[1];
   }
   throw new Error("Cannot infer COS prefix from template trainFiles");
 }
 
-function newCosKey(prefix: string, filename: string): string {
-  return `${prefix}/train/local--${randomUUID().replaceAll("-", "")}/${filename}`;
+function inferAccountPrefix(taskId: string): string {
+  const parts = taskId.split("_");
+  const amsIdx = parts.findIndex((p) => p === "ams");
+  if (amsIdx >= 0 && amsIdx + 2 < parts.length) {
+    return parts.slice(amsIdx, amsIdx + 3).join("_");
+  }
+  return "";
 }
 
-function contentTypeForTrainFile(name: string): string {
-  if (name.endsWith(".zip")) return "application/x-zip-compressed";
-  if (name.endsWith(".sh")) return "text/x-shellscript";
-  if (name.endsWith(".py")) return "text/x-python";
-  return "";
+function newCosKey(prefix: string, filename: string): string {
+  return `${prefix}/train/local--${randomUUID().replaceAll("-", "")}/${filename}`;
 }
 
 async function getFederationToken(cookieHeader: string) {
@@ -107,7 +127,7 @@ function putObject(cos: InstanceType<typeof COS>, params: Record<string, unknown
   });
 }
 
-async function uploadToCos(cookieHeader: string, localPath: string, key: string, contentType: string) {
+async function uploadToCos(cookieHeader: string, localPath: string, key: string) {
   const token = await getFederationToken(cookieHeader);
   const s = await stat(localPath);
   const cos = new COS({
@@ -115,39 +135,32 @@ async function uploadToCos(cookieHeader: string, localPath: string, key: string,
   });
   await putObject(cos, {
     Bucket: BUCKET, Region: REGION, Key: key,
-    Body: createReadStream(localPath), ContentLength: s.size, ContentType: contentType,
+    Body: createReadStream(localPath), ContentLength: s.size,
   });
   return { key, bytes: s.size };
 }
 
-function replaceTrainFiles(
-  templateFiles: Array<Record<string, string>>,
-  uploaded: Array<Record<string, unknown>>,
-) {
-  const byName = new Map(uploaded.map((f) => [f.name, f]));
-  const next: Array<Record<string, unknown>> = [];
-  const matchedNames = new Set<string>();
-  for (const file of templateFiles || []) {
-    if (byName.has(file.name)) { next.push(byName.get(file.name)!); matchedNames.add(file.name); }
-    else { next.push(file); }
-  }
-  const missing = uploaded.filter((f: Record<string, unknown>) => !matchedNames.has(f.name as string));
-  if (missing.length) {
-    throw new Error(`Template trainFiles does not contain required file: ${missing.map((f) => f.name).join(", ")}`);
-  }
-  return next;
+interface CreatePayload {
+  templateId: number;
+  name: string;
+  description: string;
+  modelName: string;
+  trainDataName: string;
+  hostGpuNum: number;
+  label: string;
+  trainFiles: Array<{ name: string; path: string; mtime: string; size: number }>;
 }
 
-function buildTaskPayload(
-  templateData: Record<string, unknown>,
-  job: { name: string; description: string },
-  uploadedTrainFiles: Array<Record<string, unknown>>,
-) {
+function buildCreatePayload(template: Record<string, unknown>, jobName: string, jobDescription: string, trainFiles: Array<{ name: string; path: string; mtime: string; size: number }>): CreatePayload {
   return {
-    ...templateData,
-    name: job.name,
-    description: job.description,
-    trainFiles: replaceTrainFiles((templateData.trainFiles as Array<Record<string, string>>) || [], uploadedTrainFiles),
+    templateId: template.templateId as number,
+    name: jobName,
+    description: jobDescription,
+    modelName: (template.modelName as string) ?? "Baseline Model Name",
+    trainDataName: (template.trainDataName as string) ?? "TencentGR",
+    hostGpuNum: (template.hostGpuNum as number) ?? 1,
+    label: (template.label as string) ?? "",
+    trainFiles,
   };
 }
 
@@ -161,91 +174,75 @@ function safeResult(result: unknown): unknown {
 export function registerTrainSubmitCommand(trainCmd: Command) {
   trainCmd
     .command("submit")
-    .description("Upload bundle to COS and create job")
+    .description("Upload bundle to COS and create a new training job")
     .requiredOption("--bundle <dir>", "Prepared bundle directory")
-    .option("--run", "Start job after creation", false)
     .option("--yes", "Skip confirmation prompt", false)
     .option("--dry-run", "Preview without uploading", false)
     .option("--output <dir>", "Output directory for plan/result")
     .action(async (opts) => {
       const bundleDir = path.resolve(opts.bundle);
-      const defaultOut = path.join("submit-live", new Date().toISOString().replace(/[:.]/g, "-"));
+      const defaultOut = path.join("taiji-output", "submit-live", new Date().toISOString().replace(/[:.]/g, "-"));
       const outDir = resolveTaijiOutputDir(opts.output ?? defaultOut);
-      const { manifest, codeZip, config, runSh, genericFiles } = await loadBundle(bundleDir);
+      const { manifest, files: bundleFiles } = await loadBundle(bundleDir);
 
-      // Template info from manifest only
-      const templateJobUrl = manifest.templateJobUrl as string;
-      const templateJobInternalId = inferInternalId(templateJobUrl);
+      // Resolve template internal ID
+      const templateJobInternalId = resolveTemplateInternalId(manifest, bundleDir);
       if (!templateJobInternalId) throw new Error("Cannot determine template job ID from manifest. Run `prepare` again with a valid `--template-id`.");
 
-      // Job name/description from manifest only
+      // Job name/description from manifest
       const jobRecord = (manifest.job as Record<string, string> | undefined) ?? {};
-      const jobName = jobRecord.name;
-      if (!jobName) throw new Error("Missing job.name in bundle manifest. Run `prepare` again with a valid `--name`.");
-      const jobDescription = jobRecord.description ?? "";
-      const job = { name: jobName, description: jobDescription };
+      if (!jobRecord.name) throw new Error("Missing job.name in bundle manifest. Run `prepare` again with a valid `--name`.");
+      const job = { name: jobRecord.name, description: jobRecord.description ?? "" };
 
-      // File metadata
-      const [zipMeta, configMeta, runShMeta, genericFileMetas] = await Promise.all([
-        codeZip ? fileMeta(codeZip) : null,
-        config ? fileMeta(config) : null,
-        runSh ? fileMeta(runSh) : null,
-        Promise.all(genericFiles.map(async (f) => ({ ...f, ...(await fileMeta(f.path)) }))),
-      ]);
+      // Auth
+      const cookieHeader = await ensureCliAuth();
+
+      // Fetch template to get templateId, trainDataName, modelName, hostGpuNum, and existing COS prefix
+      const template = await fetchJson(cookieHeader, `/taskmanagement/api/v1/webtasks/external/task/${templateJobInternalId}`);
+      const templateData = (template.data as Record<string, unknown>) ?? {};
+
+      const templateFiles = ((templateData.trainFiles as Array<{ path: string }>) || []).map((f) => ({ path: f.path }));
+      const cosPrefix = inferCosPrefix(templateFiles);
+      const accountPrefix = inferAccountPrefix(String(templateData.taskId || ""));
+      const fullCosPrefix = accountPrefix ? `${cosPrefix}/${accountPrefix}` : cosPrefix;
+
+      // Build trainFiles entries for uploaded files
+      const trainFiles = bundleFiles.map((f) => ({
+        name: f.name,
+        cosKey: newCosKey(fullCosPrefix, f.name),
+        localPath: f.localPath,
+        mtime: formatTaijiTime(),
+        size: 0, // filled by stat below
+      }));
+
+      // Get file sizes
+      for (const f of trainFiles) {
+        const s = await stat(f.localPath);
+        f.size = s.size;
+      }
 
       const mode = opts.dryRun ? "dry-run" : "execute";
 
-      // Safety check: require --yes for live execution
+      // Safety check
       if (!opts.dryRun && !opts.yes) {
         throw new Error("--dry-run is not set; add --yes to confirm live execution");
       }
 
+      const createPayload = buildCreatePayload(templateData, job.name, job.description, trainFiles.map((f) => ({
+        name: f.name, path: f.cosKey, mtime: f.mtime, size: f.size,
+      })));
+
       const plan = {
         mode,
-        templateJobUrl, templateJobInternalId,
-        runAfterSubmit: Boolean(opts.run),
+        templateJobInternalId,
         job,
-        files: {
-          ...(codeZip ? { codeZip: { path: codeZip, ...zipMeta } } : {}),
-          ...(config ? { config: { path: config, ...configMeta } } : {}),
-          ...(runSh ? { runSh: { path: runSh, ...runShMeta } } : {}),
-          ...(genericFileMetas.length ? { genericFiles: genericFileMetas } : {}),
-        },
+        cosPrefix: fullCosPrefix,
+        uploadFiles: trainFiles.map((f) => ({ name: f.name, cosKey: f.cosKey, size: f.size })),
+        createPayload: safeResult(createPayload) as Record<string, unknown>,
       };
 
-      // Auth
-      const cookieHeader = await ensureCliAuth();
-      const client = { directCookieHeader: cookieHeader };
-
-      // Fetch template and build payload
-      const template = await fetchJson(cookieHeader, `/taskmanagement/api/v1/webtasks/external/task/${templateJobInternalId}`);
-      const templateData = template.data as Record<string, unknown>;
-      if (!(templateData as Record<string, unknown> | undefined)?.trainFiles) throw new Error("Template has no data.trainFiles");
-      const cosPrefix = inferCosPrefix(templateData.trainFiles as Array<{ path: string }>);
-
-      let accountPrefix = "";
-      const rawTaskId = String((templateData as Record<string, unknown>).taskId || "");
-      const parts = rawTaskId.split("_");
-      const amsIdx = parts.findIndex((p) => p === "ams");
-      if (amsIdx >= 0 && amsIdx + 2 < parts.length) {
-        accountPrefix = parts.slice(amsIdx, amsIdx + 3).join("_");
-      }
-      const fullCosPrefix = accountPrefix ? `${cosPrefix}/${accountPrefix}` : cosPrefix;
-
-      const codeKey = codeZip ? newCosKey(fullCosPrefix, zipMeta!.basename) : null;
-      const configKey = config ? newCosKey(fullCosPrefix, configMeta!.basename) : null;
-      const uploadedTrainFiles = [
-        ...(codeZip ? [{ name: "code.zip", path: codeKey!, mtime: formatTaijiTime(), size: zipMeta!.bytes }] : []),
-        ...(config ? [{ name: "config.yaml", path: configKey!, mtime: formatTaijiTime(), size: configMeta!.bytes }] : []),
-        ...(runSh ? [{ name: "run.sh", path: newCosKey(fullCosPrefix, runShMeta!.basename), mtime: formatTaijiTime(), size: runShMeta!.bytes }] : []),
-        ...genericFileMetas.map((f) => ({ name: f.name, path: newCosKey(fullCosPrefix, f.name), mtime: formatTaijiTime(), size: f.bytes })),
-      ];
-      const taskPayload = buildTaskPayload(templateData, job, uploadedTrainFiles);
-      const networkPlan = { ...plan, cosPrefix, uploadedTrainFiles, taskPayloadPreview: safeResult(taskPayload) };
-
-      // Write plan.json
       await mkdir(outDir, { recursive: true });
-      await writeFile(path.join(outDir, "plan.json"), `${JSON.stringify(networkPlan, null, 2)}\n`, "utf8");
+      await writeFile(path.join(outDir, "plan.json"), `${JSON.stringify(plan, null, 2)}\n`, "utf8");
 
       if (opts.dryRun) {
         console.log(`Wrote dry-run plan: ${path.join(outDir, "plan.json")}`);
@@ -253,32 +250,20 @@ export function registerTrainSubmitCommand(trainCmd: Command) {
         return;
       }
 
-      // Execute live
+      // Execute: upload files to COS, then create job
       const uploadResults: Array<{ key: string; bytes: number }> = [];
-      if (codeZip) uploadResults.push(await uploadToCos(cookieHeader, codeZip, codeKey!, "application/x-zip-compressed"));
-      if (config) uploadResults.push(await uploadToCos(cookieHeader, config, configKey!, ""));
-      if (runSh) {
-        const runShFile = uploadedTrainFiles.find((f) => f.name === "run.sh");
-        uploadResults.push(await uploadToCos(cookieHeader, runSh, runShFile!.path, "text/x-shellscript"));
+      for (const f of trainFiles) {
+        const result = await uploadToCos(cookieHeader, f.localPath, f.cosKey);
+        uploadResults.push(result);
+        console.log(`  Uploaded ${f.name} -> ${result.key}`);
       }
-      for (const f of genericFileMetas) {
-        const uploadedFile = uploadedTrainFiles.find((c) => c.name === f.name);
-        uploadResults.push(await uploadToCos(cookieHeader, f.path, uploadedFile!.path, contentTypeForTrainFile(f.name)));
-      }
-      const created = await fetchJson(cookieHeader, "/taskmanagement/api/v1/webtasks/external/task", { method: "POST", body: taskPayload });
+
+      const created = await fetchJson(cookieHeader, "/taskmanagement/api/v1/webtasks/external/task", { method: "POST", body: createPayload });
       const data = (created as Record<string, unknown>).data as Record<string, unknown> | undefined;
       const taskId = data?.taskId;
       if (!taskId) throw new Error("Created task response has no data.taskId");
 
-      let startResponse = null;
-      if (opts.run) {
-        startResponse = await fetchJson(cookieHeader, `/taskmanagement/api/v1/webtasks/${taskId}/start`, { method: "POST", body: {} });
-      }
-      const instances = await fetchJson(cookieHeader, "/taskmanagement/api/v1/instances/list", {
-        method: "POST", body: { desc: true, orderBy: "create", task_id: taskId, page: 0, size: 10 },
-      });
-
-      const result = { ...networkPlan, uploadResults, created: safeResult(created), startResponse: safeResult(startResponse), instances: safeResult(instances), jobUrl: `${TAIJI_ORIGIN}/training`, taskId };
+      const result = { ...plan, uploadResults, created: safeResult(created), taskId, jobUrl: `${TAIJI_ORIGIN}/training` };
       await writeFile(path.join(outDir, "result.json"), `${JSON.stringify(result, null, 2)}\n`, "utf8");
       console.log(`Created Taiji job: ${taskId}`);
       console.log(`Wrote live result: ${path.join(outDir, "result.json")}`);

@@ -1,7 +1,7 @@
 import { Command } from "commander";
-import { mkdir, writeFile } from "node:fs/promises";
-import { existsSync, readFileSync } from "node:fs";
+import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { existsSync, readFileSync } from "node:fs";
 import { ensureCliAuth } from "../../../cli/middleware.js";
 import { resolveTaijiOutputDir } from "../../../utils/output.js";
 
@@ -41,9 +41,13 @@ function findTaijiOutputDir(fromDir: string): string | null {
 }
 
 function resolveTaskId(input: string, outDir: string): string {
+  // If it looks like a taskID (starts with angel_training_), use directly
   if (input.startsWith("angel_training_")) return input;
 
+  // If numeric, look up in jobs.json or submit result
   const numeric = /^\d+$/.test(input);
+
+  // Try jobs.json first
   if (numeric) {
     const taijiOutputDir = findTaijiOutputDir(outDir);
     if (taijiOutputDir) {
@@ -56,13 +60,22 @@ function resolveTaskId(input: string, outDir: string): string {
     }
   }
 
+  // Try submit result.json
+  const resultPath = path.join(outDir, "result.json");
+  if (existsSync(resultPath)) {
+    try {
+      const result = JSON.parse(readFileSync(resultPath, "utf8"));
+      if (result.taskId) return result.taskId;
+    } catch { /* not available */ }
+  }
+
   throw new Error(`Cannot resolve task ID from "${input}". Provide a full taskID or check jobs.json.`);
 }
 
-export function registerTrainStopCommand(trainCmd: Command) {
+export function registerTrainRunCommand(trainCmd: Command) {
   trainCmd
-    .command("stop")
-    .description("Stop a training job")
+    .command("run")
+    .description("Start a training job by task ID")
     .requiredOption("--task-id <id>", "Task ID (angel_training_...) or internal ID (numeric)")
     .option("--output <dir>", "Output directory for result (default: taiji-output/train-jobs)")
     .action(async (opts) => {
@@ -71,16 +84,16 @@ export function registerTrainStopCommand(trainCmd: Command) {
 
       const cookieHeader = await ensureCliAuth();
 
-      const response = await fetchJson(cookieHeader, `/taskmanagement/api/v1/webtasks/${taskId}/stop`, { method: "POST", body: {} });
+      const startResponse = await fetchJson(cookieHeader, `/taskmanagement/api/v1/webtasks/${taskId}/start`, { method: "POST", body: {} });
+      const data = (startResponse as Record<string, unknown>).data as Record<string, unknown> | undefined;
 
       const result = {
         taskId,
-        stoppedAt: new Date().toISOString(),
-        response,
+        startedAt: new Date().toISOString(),
+        response: data,
       };
 
-      await mkdir(outDir, { recursive: true });
-      await writeFile(path.join(outDir, `stop-${taskId}.json`), JSON.stringify(result, null, 2), "utf8");
-      console.log(`Stopped job: ${taskId}`);
+      await writeFile(path.join(outDir, `run-${taskId}.json`), JSON.stringify(result, null, 2), "utf8");
+      console.log(`Started job: ${taskId}`);
     });
 }

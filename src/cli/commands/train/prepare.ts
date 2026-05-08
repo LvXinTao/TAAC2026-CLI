@@ -1,5 +1,5 @@
 import { Command } from "commander";
-import { access, copyFile, mkdir, stat, writeFile } from "node:fs/promises";
+import { access, copyFile, mkdir, readdir, stat, writeFile } from "node:fs/promises";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import path from "node:path";
@@ -7,22 +7,31 @@ import { resolveTaijiOutputDir } from "../../../utils/output.js";
 
 const execFileAsync = promisify(execFile);
 
+// File patterns to include when scanning a source directory
+const TRAIN_FILE_PATTERNS = [
+  /\.py$/,       // Python files
+  /\.sh$/,       // Shell scripts
+  /\.json$/,     // Config JSON (ns_groups.json, etc.)
+  /\.yaml$/,     // YAML configs
+  /\.yml$/,
+  /\.toml$/,
+  /\.txt$/,
+  /\.cfg$/,
+  /\.ini$/,
+];
+
+// Files that should always be treated as trainFiles (not generic)
+const PRIMARY_FILES = new Set(["run.sh", "train.py", "model.py", "trainer.py", "dataset.py", "utils.py", "config.yaml"]);
+
 async function exists(p: string) {
-  try {
-    await access(p);
-    return true;
-  } catch {
-    return false;
-  }
+  try { await access(p); return true; } catch { return false; }
 }
 
 async function runGit(args: string[]): Promise<string | null> {
   try {
     const { stdout } = await execFileAsync("git", args, { timeout: 10000 });
     return stdout.trim();
-  } catch {
-    return null;
-  }
+  } catch { return null; }
 }
 
 async function getGitInfo() {
@@ -34,13 +43,28 @@ async function getGitInfo() {
     runGit(["status", "--short"]),
   ]);
   return {
-    available: true,
-    root,
-    branch,
-    head,
-    dirty: Boolean(statusShort),
-    statusShort: statusShort || "",
+    available: true, root, branch, head,
+    dirty: Boolean(statusShort), statusShort: statusShort || "",
   };
+}
+
+async function scanDir(srcDir: string): Promise<string[]> {
+  const entries = await readdir(srcDir);
+  const files: string[] = [];
+  for (const entry of entries) {
+    const fp = path.join(srcDir, entry);
+    const s = await stat(fp);
+    if (s.isDirectory()) {
+      // Include subdirectories that look like inference/
+      if (entry === "inference") {
+        const subFiles = await scanDir(fp);
+        files.push(...subFiles);
+      }
+    } else if (TRAIN_FILE_PATTERNS.some((pat) => pat.test(entry))) {
+      files.push(fp);
+    }
+  }
+  return files;
 }
 
 async function fileInfo(fp: string) {
@@ -49,37 +73,20 @@ async function fileInfo(fp: string) {
 }
 
 function makeNextSteps(manifest: Record<string, unknown>) {
-  const files = manifest.files as Record<string, unknown>;
-  const primaryNames = [
-    files.codeZip ? "code zip" : null,
-    files.config ? "config file" : null,
-    files.runSh ? "`run.sh`" : null,
-  ].filter(Boolean);
+  const files = manifest.files as Array<Record<string, unknown>>;
   const lines = [
     "# Taiji Submit Next Steps", "",
-    "This directory was prepared by `prepare-taiji-submit.mjs`.", "",
+    "This directory was prepared by `taac2026 train prepare`.", "",
     "## Intended live workflow", "",
-    "1. Open the template Job URL in a logged-in browser.",
-    "2. Copy the template Job.",
-    primaryNames.length
-      ? `3. Replace ${primaryNames.join(", ")} with the files in \`files/\`.`
-      : "3. No primary files were prepared.",
-    files.runSh
-      ? "4. Confirm the new `run.sh` entrypoint matches this experiment."
-      : "4. Keep `run.sh` unchanged unless the experiment explicitly needs a new entrypoint.",
-    "5. Fill Job Name and Job Description from `manifest.json`.",
-    "6. Submit the copied Job.",
-    "7. Record the Job ID / instance ID.", "",
+    "1. Run `taac2026 train submit --bundle <dir> --yes` to upload and create the job.",
+    "2. Run `taac2026 train run --task-id <id>` to start the job (optional).", "",
     "## Prepared values", "",
     `- Template Job ID: ${manifest.templateJobId}`,
     `- Job Name: ${(manifest.job as Record<string, string>).name}`,
     `- Job Description: ${(manifest.job as Record<string, string>).description || ""}`,
-    ...(files.codeZip ? [`- Code zip: files/${(files.codeZip as Record<string, string>).basename}`] : []),
-    ...(files.config ? [`- Config: files/${(files.config as Record<string, string>).basename}`] : []),
-    ...(files.runSh ? [`- run.sh: files/${(files.runSh as Record<string, string>).basename}`] : []), "",
+    `- Files: ${files.map((f) => f.name).join(", ")}`, "",
     "## Automation note", "",
-    "Live API/browser submission is intentionally not executed by this preparation tool.",
-    "Before enabling it, capture one successful manual Copy Job -> upload zip/config -> submit -> run flow from DevTools.", "",
+    "The submit command uploads files to COS and creates a new training job via API.", "",
   ];
   return `${lines.join("\n")}\n`;
 }
@@ -87,58 +94,72 @@ function makeNextSteps(manifest: Record<string, unknown>) {
 export function registerTrainPrepareCommand(trainCmd: Command) {
   trainCmd
     .command("prepare")
-    .description("Prepare a submission bundle without uploading")
+    .description("Prepare a submission bundle from a source directory")
     .requiredOption("--template-id <id>", "Template job URL or internal ID")
     .requiredOption("--name <name>", "Job name")
-    .option("--zip <path>", "Path to code.zip")
-    .option("--config <path>", "Path to config.yaml")
-    .option("--run-sh <path>", "Path to run.sh")
+    .requiredOption("--source <dir>", "Source directory containing model code")
+    .option("--include <patterns>", "Comma-separated glob patterns to include (e.g. '*.py,*.sh')")
+    .option("--exclude <patterns>", "Comma-separated patterns to exclude (e.g. '__pycache__',*.pyc)")
     .option("--description <text>", "Job description")
     .option("--output <dir>", "Output directory (default: submit-bundle)")
     .action(async (opts) => {
-      const codeZip = opts.zip ? path.resolve(opts.zip) : null;
-      const config = opts.config ? path.resolve(opts.config) : null;
-      const runSh = opts.runSh ? path.resolve(opts.runSh) : null;
+      const srcDir = path.resolve(opts.source);
+      if (!(await exists(srcDir))) throw new Error(`Source directory not found: ${srcDir}`);
+
       const outDir = resolveTaijiOutputDir(opts.output ?? "submit-bundle");
       const filesDir = path.join(outDir, "files");
 
-      if (codeZip && !(await exists(codeZip))) throw new Error(`Code zip not found: ${codeZip}`);
-      if (config && !(await exists(config))) throw new Error(`Config file not found: ${config}`);
-      if (codeZip && !path.basename(codeZip).toLowerCase().endsWith(".zip")) throw new Error(`--zip must be a .zip file: ${codeZip}`);
-      if (runSh && !(await exists(runSh))) throw new Error(`run.sh not found: ${runSh}`);
-      if (runSh && path.basename(runSh) !== "run.sh") throw new Error(`--run-sh must point to a file named run.sh: ${runSh}`);
-      if (!codeZip && !config && !runSh) {
-        throw new Error("No trainFiles prepared. Provide at least one of --zip, --config, or --run-sh.");
+      // Parse include/exclude patterns
+      const excludePatterns = opts.exclude
+        ? opts.exclude.split(",").map((p: string) => p.trim())
+        : ["__pycache__", "*.pyc", "*.egg-info", ".git", ".DS_Store", "inference/"];
+
+      const scanFiles = await scanDir(srcDir);
+
+      // Filter out excluded patterns
+      const filteredFiles = scanFiles.filter((fp) => {
+        const rel = path.relative(srcDir, fp);
+        return !excludePatterns.some((pat: string) => rel.includes(pat) || rel.endsWith(pat));
+      });
+
+      if (filteredFiles.length === 0) {
+        throw new Error("No source files found. Check the source directory or --exclude patterns.");
       }
 
       const git = await getGitInfo();
-
       await mkdir(filesDir, { recursive: true });
 
-      const copiedZip = codeZip ? path.join(filesDir, path.basename(codeZip)) : null;
-      const copiedConfig = config ? path.join(filesDir, path.basename(config)) : null;
-      const copiedRunSh = runSh ? path.join(filesDir, "run.sh") : null;
-      if (codeZip) await copyFile(codeZip, copiedZip!);
-      if (config) await copyFile(config, copiedConfig!);
-      if (runSh) await copyFile(runSh, copiedRunSh!);
+      // Copy files preserving relative paths
+      const fileEntries: Array<Record<string, unknown>> = [];
+      for (const srcFile of filteredFiles) {
+        const relPath = path.relative(srcDir, srcFile);
+        const destPath = path.join(filesDir, relPath);
+        await mkdir(path.dirname(destPath), { recursive: true });
+        await copyFile(srcFile, destPath);
+        fileEntries.push({
+          name: relPath,
+          preparedPath: path.relative(outDir, destPath).replaceAll(path.sep, "/"),
+          isPrimary: PRIMARY_FILES.has(relPath) ? "true" : "false",
+          ...(await fileInfo(srcFile)),
+        });
+      }
 
       const manifest = {
         schemaVersion: 1,
         createdAt: new Date().toISOString(),
+        sourceDir: opts.source,
         templateJobId: opts.templateId,
         job: { name: opts.name, description: opts.description || "" },
-        files: {
-          ...(codeZip ? { codeZip: { ...(await fileInfo(codeZip)), preparedPath: path.relative(outDir, copiedZip!).replaceAll(path.sep, "/") } } : {}),
-          ...(config ? { config: { ...(await fileInfo(config)), preparedPath: path.relative(outDir, copiedConfig!).replaceAll(path.sep, "/") } } : {}),
-          ...(runSh ? { runSh: { ...(await fileInfo(runSh)), preparedPath: path.relative(outDir, copiedRunSh!).replaceAll(path.sep, "/") } } : {}),
-        },
+        files: fileEntries,
         git,
       };
 
       await writeFile(path.join(outDir, "manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
       await writeFile(path.join(outDir, "NEXT_STEPS.md"), makeNextSteps(manifest), "utf8");
+
       console.log(`Prepared Taiji submission bundle: ${outDir}`);
-      console.log(`Manifest: ${path.join(outDir, "manifest.json")}`);
-      console.log(`Next steps: ${path.join(outDir, "NEXT_STEPS.md")}`);
+      console.log(`  ${fileEntries.length} files copied to files/`);
+      console.log(`  Manifest: ${path.join(outDir, "manifest.json")}`);
+      console.log(`  Next steps: ${path.join(outDir, "NEXT_STEPS.md")}`);
     });
 }

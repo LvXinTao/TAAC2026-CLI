@@ -6,12 +6,14 @@ import { registerTrainMetricsCommand } from "./metrics.js";
 import { registerTrainStopCommand } from "./stop.js";
 import { registerTrainDeleteCommand } from "./delete.js";
 import { registerTrainPrepareCommand } from "./prepare.js";
+import { registerTrainRunCommand } from "./run.js";
 import { registerTrainSubmitCommand } from "./submit.js";
 
 export function registerTrainCommand(program: Command) {
   const trainCmd = program.command("train").description("Manage training tasks");
   registerTrainPrepareCommand(trainCmd);
   registerTrainSubmitCommand(trainCmd);
+  registerTrainRunCommand(trainCmd);
   registerTrainListCommand(trainCmd);
   registerTrainDescribeCommand(trainCmd);
   registerTrainLogsCommand(trainCmd);

@@ -1,5 +1,6 @@
 import { Command } from "commander";
 import { registerTrainListCommand } from "./list.js";
+import { registerTrainDescribeCommand } from "./describe.js";
 import { registerTrainLogsCommand } from "./logs.js";
 import { registerTrainMetricsCommand } from "./metrics.js";
 import { registerTrainStopCommand } from "./stop.js";
@@ -12,6 +13,7 @@ export function registerTrainCommand(program: Command) {
   registerTrainPrepareCommand(trainCmd);
   registerTrainSubmitCommand(trainCmd);
   registerTrainListCommand(trainCmd);
+  registerTrainDescribeCommand(trainCmd);
   registerTrainLogsCommand(trainCmd);
   registerTrainMetricsCommand(trainCmd);
   registerTrainStopCommand(trainCmd);

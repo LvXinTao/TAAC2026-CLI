@@ -9,7 +9,7 @@ export function registerEvalLogsCommand(evalCmd: Command) {
   evalCmd
     .command("logs")
     .description("View evaluation task logs")
-    .requiredOption("--task-id <id>", "Evaluation task ID")
+    .requiredOption("--task-id <id>", "Evaluation task ID (from eval list output)")
     .option("--output <dir>", "Output directory (default: taiji-output/eval-jobs/logs)")
     .action(async (opts) => {
       const outDir = resolveTaijiOutputDir(opts.output ?? "taiji-output/eval-jobs/logs");

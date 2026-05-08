@@ -9,7 +9,7 @@ export function registerEvalMetricsCommand(evalCmd: Command) {
   evalCmd
     .command("metrics")
     .description("View evaluation task metrics")
-    .requiredOption("--task-id <id>", "Evaluation task ID")
+    .requiredOption("--task-id <id>", "Evaluation task ID (from eval list output)")
     .option("--json", "Output JSON to stdout instead of file")
     .option("--output <dir>", "Output directory (default: taiji-output/eval-jobs/metrics)")
     .action(async (opts) => {

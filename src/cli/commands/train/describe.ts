@@ -16,8 +16,8 @@ async function loadJobsMapping(jobsFile: string): Promise<Record<string, { jobId
 export function registerTrainDescribeCommand(trainCmd: Command) {
   trainCmd
     .command("describe")
-    .description("Fetch full details of a single training job, or all jobs with --all")
-    .option("--job-id <id>", "Job ID (taskID string)")
+    .description("Fetch full details of a training job, or all jobs with --all. --job-id accepts the full taskID string (angel_training_...).")
+    .option("--job-id <id>", "Job ID — the full taskID string (angel_training_...). Use --all instead to describe all jobs.")
     .option("--all", "Describe all jobs from jobs.json")
     .option("--output <dir>", "Output directory (default: taiji-output/train-jobs)")
     .action(async (opts) => {

@@ -9,8 +9,8 @@ import { toCsv } from "../../../utils/format.js";
 export function registerTrainMetricsCommand(trainCmd: Command) {
   trainCmd
     .command("metrics")
-    .description("Get training job metrics")
-    .requiredOption("--job-id <id>", "Job ID (taskID string)")
+    .description("Get training job metrics (loss, AUC, etc.) for all instances")
+    .requiredOption("--job-id <id>", "Job ID — the full taskID string (angel_training_...)")
     .option("--json", "Output JSON to stdout instead of CSV file")
     .option("--output <dir>", "Output directory (default: taiji-output/train-jobs/metrics)")
     .action(async (opts) => {

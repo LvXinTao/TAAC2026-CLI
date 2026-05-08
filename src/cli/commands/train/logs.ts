@@ -9,8 +9,8 @@ import { normalizeLogLines } from "../../../utils/format.js";
 export function registerTrainLogsCommand(trainCmd: Command) {
   trainCmd
     .command("logs")
-    .description("Get training job logs")
-    .requiredOption("--job-id <id>", "Job ID (taskID string)")
+    .description("Fetch training job logs for all instances")
+    .requiredOption("--job-id <id>", "Job ID — the full taskID string (angel_training_...)")
     .option("--output <dir>", "Output directory (default: taiji-output/train-jobs)")
     .action(async (opts) => {
       const outDir = resolveTaijiOutputDir(opts.output ?? "taiji-output/train-jobs");

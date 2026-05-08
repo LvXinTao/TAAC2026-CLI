@@ -174,7 +174,7 @@ function safeResult(result: unknown): unknown {
 export function registerTrainSubmitCommand(trainCmd: Command) {
   trainCmd
     .command("submit")
-    .description("Upload bundle to COS and create a new training job")
+    .description("Upload bundle to COS and create a new training job. The template ID is read from the bundle manifest.")
     .requiredOption("--bundle <dir>", "Prepared bundle directory")
     .option("--yes", "Skip confirmation prompt", false)
     .option("--dry-run", "Preview without uploading", false)

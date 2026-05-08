@@ -40,47 +40,41 @@ function findTaijiOutputDir(fromDir: string): string | null {
   return null;
 }
 
-function resolveTaskId(input: string, outDir: string): string {
-  if (input.startsWith("angel_training_")) return input;
-
-  const numeric = /^\d+$/.test(input);
-  if (numeric) {
-    const taijiOutputDir = findTaijiOutputDir(outDir);
-    if (taijiOutputDir) {
-      try {
-        const jobsData = JSON.parse(readFileSync(path.join(taijiOutputDir, "jobs.json"), "utf8"));
-        for (const [, entry] of Object.entries(jobsData.jobsById ?? {}) as Array<[string, any]>) {
-          if (String(entry.jobInternalId) === input) return entry.jobId;
-        }
-      } catch { /* not available */ }
-    }
-  }
-
-  throw new Error(`Cannot resolve task ID from "${input}". Provide a full taskID or check jobs.json.`);
+async function resolveInstanceId(cookieHeader: string, taskId: string): Promise<string> {
+  const instances = await fetchJson(cookieHeader, "/taskmanagement/api/v1/instances/list", {
+    method: "POST", body: { desc: true, orderBy: "create", task_id: taskId, page: 0, size: 10 },
+  });
+  const list = instances.data as Array<{ id: string }> | undefined;
+  if (list && list.length > 0 && list[0].id) return list[0].id;
+  throw new Error(`No instances found for task ${taskId}`);
 }
 
 export function registerTrainStopCommand(trainCmd: Command) {
   trainCmd
     .command("stop")
-    .description("Stop a training job")
-    .requiredOption("--task-id <id>", "Task ID (angel_training_...) or internal ID (numeric)")
+    .description("Stop a training job by killing its running instance. --task-id accepts the full taskID string (angel_training_...). The instance ID is resolved automatically from the API.")
+    .requiredOption("--task-id <id>", "Task ID — full taskID string (angel_training_...)")
     .option("--output <dir>", "Output directory for result (default: taiji-output/train-jobs)")
     .action(async (opts) => {
       const outDir = resolveTaijiOutputDir(opts.output ?? "taiji-output/train-jobs");
-      const taskId = resolveTaskId(opts.taskId, outDir);
+      const taskId = opts.taskId;
 
       const cookieHeader = await ensureCliAuth();
 
-      const response = await fetchJson(cookieHeader, `/taskmanagement/api/v1/webtasks/${taskId}/stop`, { method: "POST", body: {} });
+      // Get instance ID for the task
+      const instanceId = await resolveInstanceId(cookieHeader, taskId);
+
+      const response = await fetchJson(cookieHeader, `/taskmanagement/api/v1/instances/${instanceId}/kill`, { method: "POST", body: {} });
 
       const result = {
         taskId,
+        instanceId,
         stoppedAt: new Date().toISOString(),
         response,
       };
 
       await mkdir(outDir, { recursive: true });
       await writeFile(path.join(outDir, `stop-${taskId}.json`), JSON.stringify(result, null, 2), "utf8");
-      console.log(`Stopped job: ${taskId}`);
+      console.log(`Stopped job ${taskId} (instance ${instanceId})`);
     });
 }

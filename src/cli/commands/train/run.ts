@@ -75,8 +75,8 @@ function resolveTaskId(input: string, outDir: string): string {
 export function registerTrainRunCommand(trainCmd: Command) {
   trainCmd
     .command("run")
-    .description("Start a training job by task ID")
-    .requiredOption("--task-id <id>", "Task ID (angel_training_...) or internal ID (numeric)")
+    .description("Start a training job. --task-id accepts the full taskID string (angel_training_...) or a numeric internal ID (resolved via jobs.json).")
+    .requiredOption("--task-id <id>", "Task ID — full taskID string (angel_training_...) or numeric internal ID")
     .option("--output <dir>", "Output directory for result (default: taiji-output/train-jobs)")
     .action(async (opts) => {
       const outDir = resolveTaijiOutputDir(opts.output ?? "taiji-output/train-jobs");

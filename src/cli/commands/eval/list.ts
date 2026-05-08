@@ -9,7 +9,7 @@ import { toCsv } from "../../../utils/format.js";
 export function registerEvalListCommand(evalCmd: Command) {
   evalCmd
     .command("list")
-    .description("Scrape evaluation task list")
+    .description("List evaluation tasks with optional log scraping")
     .option("--page-size <n>", "Page size", (v: string) => parseInt(v, 10))
     .option("--output <dir>", "Output directory (default: taiji-output)")
     .action(async (opts) => {

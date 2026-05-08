@@ -95,7 +95,7 @@ export function registerTrainPrepareCommand(trainCmd: Command) {
   trainCmd
     .command("prepare")
     .description("Prepare a submission bundle from a source directory")
-    .requiredOption("--template-id <id>", "Template job URL or internal ID")
+    .requiredOption("--template-id <id>", "Template job ID — the full taskID string (e.g. angel_training_ams_...)")
     .requiredOption("--name <name>", "Job name")
     .requiredOption("--source <dir>", "Source directory containing model code")
     .option("--include <patterns>", "Comma-separated glob patterns to include (e.g. '*.py,*.sh')")

@@ -5,8 +5,8 @@ import { fetchJson } from "../../../api/client.js";
 export function registerTrainDeleteCommand(trainCmd: Command) {
   trainCmd
     .command("delete")
-    .description("Delete a training job")
-    .requiredOption("--job-internal-id <id>", "Job internal ID to delete (numeric)")
+    .description("Delete a training job. Requires the numeric internal ID (visible in jobs.json or the submit result.json).")
+    .requiredOption("--job-internal-id <id>", "Job internal ID — the numeric ID (e.g. 74958), not the taskID string")
     .option("--yes", "Skip confirmation prompt", false)
     .action(async (opts) => {
       const cookieHeader = await ensureCliAuth();

@@ -3,7 +3,7 @@ import { mkdir, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { chromium } from "playwright";
-import { parseCookieEntries } from "../../auth/token.js";
+import { parseCookieEntries, extractCookieHeader } from "../../auth/token.js";
 
 const TAIJI_ORIGIN = "https://taiji.algo.qq.com";
 const SECRET_DIR = ".taac2026/secrets";
@@ -17,6 +17,12 @@ async function saveCookie(cookieHeader: string): Promise<string> {
   return cookiePath;
 }
 
+async function loginWithCookieString(raw: string) {
+  const cookieHeader = extractCookieHeader(raw);
+  const cookiePath = await saveCookie(cookieHeader);
+  console.log(`Cookie saved to ${cookiePath}`);
+}
+
 async function loginWithBrowser(timeout: number) {
   const userDataDir = path.join(tmpdir(), `taac2026-login-${Date.now()}`);
   const launchChrome = async (channel?: string) =>
@@ -28,7 +34,6 @@ async function loginWithBrowser(timeout: number) {
 
   let browser: Awaited<ReturnType<typeof chromium.launchPersistentContext>>;
   try {
-    // Try real Chrome first (better fingerprint), fall back to bundled Chromium
     browser = await launchChrome("chrome");
     console.log("Using installed Chrome for login…");
   } catch {
@@ -80,9 +85,21 @@ async function loginWithBrowser(timeout: number) {
 export function registerLoginCommand(program: Command) {
   program
     .command("login")
-    .description("Browser SSO login, save cookie to .taac2026/secrets/")
-    .option("--timeout <ms>", "Login timeout in ms", (v) => parseInt(v, 10), 120000)
+    .description("Login and save cookie to .taac2026/secrets/")
+    .option("--timeout <ms>", "Browser login timeout in ms", (v) => parseInt(v, 10), 120000)
+    .option("--cookie-string <string>", "Paste cookie string directly")
+    .option("--stdin", "Read cookie string from stdin")
     .action(async (opts) => {
+      if (opts.cookieString) {
+        await loginWithCookieString(opts.cookieString);
+        return;
+      }
+      if (opts.stdin) {
+        const chunks: string[] = [];
+        for await (const chunk of process.stdin) chunks.push(chunk);
+        await loginWithCookieString(chunks.join(""));
+        return;
+      }
       await loginWithBrowser(opts.timeout);
     });
 }

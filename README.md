@@ -1,423 +1,479 @@
-# TAAC2026 CLI
+# TAAC2026-CLI 使用文档
 
-[English](README.en.md)
+TAAC2026 / Taiji 实验平台的命令行工具，用于管理训练任务（train）和评估任务（eval）。
 
-把 Taiji / TAAC 训练平台变成任何人和任何 agent 都能读取、比较、归档、提交训练的实验命令行工具。
+## 认证
 
-TAAC2026 CLI 面向 `https://taiji.algo.qq.com/training` 和 `https://taiji.algo.qq.com/evaluation`：它可以抓取训练任务、评测任务、指标、日志、checkpoint、代码文件，比较两个 `config.yaml` 的语义差异，并通过已捕获的 Taiji API 流程准备、上传、创建和启动训练任务。所有本地产物默认收进 `taiji-output/`，不会把根目录弄得一团乱。
-
-`SKILL.md` 是通用 agent 操作手册：Codex、Claude Code、OpenAI Agents SDK、Cursor、Aider，或者任何能读仓库文件并运行 shell 的 agent，都可以按它来使用本 CLI。
-
-## 给 Agent 一键安装
-
-直接把这段话发给你的 agent：
-
-```text
-请安装并使用这个通用 agent CLI：
-https://github.com/ZhongKuang/TAAC2026-CLI.git
-
-安装后请运行 npm install 和 npm run build。需要全局 CLI 时运行 npm link。
-需要浏览器模式时再安装 Chromium：
-npx playwright install chromium
-```
-
-手动安装：
+所有命令均需要登录认证。首次使用前请先执行：
 
 ```bash
-git clone https://github.com/ZhongKuang/TAAC2026-CLI.git
-cd TAAC2026-CLI
-npm install
-npm run build
-npm link
-npx playwright install chromium
+taac2026 login
 ```
 
-之后可以直接运行：
+该命令会启动浏览器登录 Taiji 平台，获取 Cookie 并保存到 `.taac2026/secrets/taiji-cookie.txt`。后续命令自动从该文件读取认证信息。
 
-```bash
-taac2026 --help
-```
+---
 
-## 命令结构
+## 训练任务（train）
 
-重构后的 CLI 使用嵌套子命令结构，按训练生命周期分组：
+标准工作流程：
 
 ```
-taac2026
-├── login                              # 浏览器 SSO 登录，保存 cookie
-├── train
-│   ├── prepare                        # 准备提交包
-│   ├── submit                         # 上传到 COS 并创建 Job
-│   ├── list                           # 抓取训练任务列表
-│   ├── logs                           # 获取实验日志
-│   ├── metrics                        # 获取实验指标
-│   ├── stop                           # 停止 Job
-│   └── delete                         # 删除 Job
-└── eval
-    ├── list                           # 抓取评测任务列表
-    ├── logs                           # 查看评测日志
-    ├── metrics                        # 查看评测指标
-    └── create                         # 创建评测任务
+prepare → submit → run
 ```
 
-> **兼容性**：旧的 `taac2026 scrape`、`taac2026 diff-config` 等扁平命令仍然可用，但推荐迁移到新的 `taac2026 train list`、`taac2026 train config-diff` 等子命令。
+即：先打包源码，再上传到 COS 并创建训练任务，最后启动训练。
 
-## 痛点：训练平台不该占用你的工作记忆
+### `train prepare` — 准备提交包
 
-每天早上醒来，第一反应不该是打开官网、点进一个个实例、手动检查训练曲线。但现实常常是这样：metric 一多，就要拖着鼠标在页面里上下滑，逐个找 AUC、logloss、valid/test-like 指标；刚记住一个实例的数值，切到下一个实例准备对比，前一个又忘了，只好再回去重复打开。
+从源码目录扫描模型文件，准备一个可提交的 bundle。
 
-训练报错也一样折磨人。你要点进实例、打开 logs、复制粘贴，再解释这次跑的是哪份代码、哪个 commit、哪个 config。agent 如果拿不到日志、代码和配置的稳定快照，就只能靠你转述，很难真正定位问题。
-
-更糟的是提交训练本身也容易出错。好不容易写了一版不错的代码，上传时却可能传错 zip、忘了换 config、只改了标题没改超参数，白白跑几个 epoch 才发现。于是每次提交都变成一场小心翼翼的人工仪式。
-
-最关键的是，训练产出的 metric 明明应该交给 agent 跨实例分析，却常常只能靠人脑短时记忆做比较。TAAC2026 CLI 的目的就是把这些"页面劳动"变成可归档、可比较、可自动化的实验数据流。
-
-## 我们能解决什么
-
-| 痛点 | TAAC2026 CLI 怎么解决 |
-| --- | --- |
-| 每天手动点开多个实例看曲线 | `taac2026 train list` 批量抓取 Job、实例、checkpoint 和 metrics，输出 `jobs.json`、`all-metrics-long.csv`、`all-checkpoints.csv`。 |
-| metric 多了以后只能靠鼠标滑动和人脑记忆对比 | 把指标转成长表，保留 `jobId + instanceId + metric + step`，让 agent 可以一次性跨 Job / Run 做排序、对比和总结。 |
-| 同一个 Job 多次 Run 容易混在一起 | 用 `jobId + instanceId` 区分每次运行，避免"这个 AUC 到底是哪次跑出来的"。 |
-| 报错后需要手动复制日志，再口头解释代码版本 | `taac2026 train logs` 自动归档 Pod log、Job detail、训练代码文件和 `config.yaml`，让 agent 拿着完整现场排查。 |
-| 对比两个实验配置时只能肉眼扫 YAML | `taac2026 train config-diff` 做语义 diff，按配置路径报告新增、删除和变化项。 |
-| 上传训练容易传错 zip / config / run.sh / 标题和说明 | `taac2026 train prepare` 先生成提交包和 manifest，记录 Job Name、Description、Git HEAD、dirty 状态和待上传文件。 |
-| 想自动提交但又怕误启动训练 | `taac2026 train submit` 默认 dry-run；真实创建必须显式 `--execute --yes`，启动必须额外 `--run`。 |
-| 工具产物散落根目录，越用越乱 | 所有本地产物默认写入 `taiji-output/`，包括浏览器 profile、抓取结果、提交包、dry-run/live 结果和 config diff。 |
-| 评测任务结果只能靠浏览器看 | `taac2026 eval list` 批量抓取 Evaluation 任务和 event log，输出 `eval-tasks.json`、`eval-tasks-summary.csv` 和每个任务的日志文件。 |
-
-## 它让 Agent 可以做什么
-
-- 一键抓取最近所有训练，把实验指标整理成可分析表格。
-- 帮你回答"这一版到底比上一版强在哪里，弱在哪里"。
-- 结合 Job 描述、config diff、日志和曲线，定位训练报错或指标异常。
-- 在提交前检查本次 zip/config/run.sh/name/description 是否和 manifest 一致。
-- 复用一个稳定模板 Job，自动替换 `code.zip`、`config.yaml`，并可显式覆写 `run.sh` 后按需启动训练。
-- 把平台页面里的短暂信息沉淀成长期可复盘的实验资产。
-
-## 核心能力
-
-| 能力 | 输出 |
-| --- | --- |
-| 批量抓 Job | `jobs.json`、`jobs-summary.csv` |
-| 抓 Metrics / tf_events | `all-metrics-long.csv` |
-| 抓 Checkpoints | `all-checkpoints.csv` |
-| 抓 Pod logs | `logs/<jobId>/<instanceId>.txt` |
-| 下载训练代码 | `code/<jobId>/files/...` |
-| 保存任务详情 | `code/<jobId>/job-detail.json`、`train-files.json` |
-| 批量抓 Evaluation 任务 | `eval-tasks.json`、`eval-tasks-summary.csv` |
-| 抓评测 event log | `eval-logs/<task_id>.txt` |
-| 准备提交包 | `taiji-output/submit-bundle/` |
-| dry-run / live submit | `taiji-output/submit-live/<timestamp>/` |
-
-## 快速开始
-
-### 登录
-
-使用浏览器 SSO 登录并保存 cookie：
-
-```bash
-taac2026 login --headless
-```
-
-或使用已有的 cookie 文件：
-
-```bash
-taac2026 login --cookie-file path/to/cookie.txt
-```
-
-Cookie 默认保存到 `taiji-output/secrets/taiji-cookie.txt`。
-
-### 抓取训练任务
-
-抓取全部训练任务：
-
-```bash
-taac2026 train list --all --cookie-file taiji-output/secrets/taiji-cookie.txt --headless
-```
-
-增量同步会完整扫描 Job list，但对本地已有、终态、且 `updateTime/status/jzStatus` 没变的 Job 跳过 detail、代码、实例、metric 和 log 的深拉：
-
-```bash
-taac2026 train list --all --incremental --cookie-file taiji-output/secrets/taiji-cookie.txt --direct
-```
-
-只核查某个 Job 的详情、代码文件和指标时，可以按平台内部 ID 定向抓取：
-
-```bash
-taac2026 train list --all --job-internal-id 56242 --cookie-file taiji-output/secrets/taiji-cookie.txt --direct
-```
-
-服务器上 Chromium 不稳定时，用后端直连模式：
-
-```bash
-taac2026 train list --all --cookie-file taiji-output/secrets/taiji-cookie.txt --direct
-```
-
-### 抓取评测任务
-
-```bash
-taac2026 eval list --cookie-file taiji-output/secrets/taiji-cookie.txt --direct
-```
-
-### 查看日志和指标
-
-```bash
-taac2026 train logs --job 56242 --cookie-file taiji-output/secrets/taiji-cookie.txt --direct
-taac2026 train metrics --job 56242 --cookie-file taiji-output/secrets/taiji-cookie.txt --direct
-```
-
-### 比较配置
-
-```bash
-taac2026 train config-diff old-config.yaml new-config.yaml
-taac2026 train config-diff old-config.yaml new-config.yaml --json --out diff.json
-```
-
-`--out diff.json` 会写到 `taiji-output/config-diffs/diff.json`，不会掉到根目录。
-
-## 日常实验工具
-
-提交前检查 bundle 文件是否齐全：
-
-```bash
-ls taiji-output/submit-bundle/files/
-```
-
-快速抽取错误日志，或查看某个 Job 的指标：
-
-```bash
-taac2026 train logs --job 60414 --errors --tail 100
-taac2026 train metrics --job 56242 --cookie-file taiji-output/secrets/taiji-cookie.txt --direct
-```
-
-## 自动提交训练
-
-提交链路分两层：先准备，再执行。默认只 dry-run，不会误上传、误创建、误启动。
-
-### 推荐提交包形态
-
-公开版推荐使用最简单、最稳定的 Taiji trainFiles 形态：
-
-```text
-code.zip
-run.sh
-config.yaml
-```
-
-- `code.zip` 放项目代码，由你的仓库脚本或 agent 打包生成。
-- `run.sh` 是平台入口，负责解压/定位代码并读取 `config.yaml` 启动训练。
-- `config.yaml` 放本次实验参数。
-
-本仓库提供了一个不含真实代码的最小示例：
-
-```text
-examples/minimal-taiji-submit/
-  code/
-  run.sh
-  config.yaml
-```
-
-你的 agent 可以参考这个形态打包：把项目代码放进 `code.zip`，把实验参数写入 `config.yaml`，用 `run.sh` 作为统一入口。自动提交脚本默认替换 `code.zip` 和 `config.yaml`；如果传入 `--run-sh ./run.sh`，也会显式覆写模板里的同名 `run.sh`。模板 Job 里必须已有这些同名 trainFiles；只有明确加 `--allow-add-file` 时才允许新增。
-
-如果别人的模板不是 zip 形态，而是散文件，例如 `main.py + dataset.py + run.sh`，也可以用通用文件适配：
+**用法：**
 
 ```bash
 taac2026 train prepare \
-  --template-job-url "https://taiji.algo.qq.com/training/..." \
-  --file-dir "./taiji-files" \
-  --name "loose_files_exp"
+  --name <任务名称> \
+  --source <源码目录> \
+  [--template-id <模板任务ID>] \
+  [--description <描述>] \
+  [--include <包含模式>] \
+  [--exclude <排除模式>] \
+  [--output <输出目录>]
 ```
 
-`--file-dir` 只扫描目录第一层文件；自动识别 `code.zip`、`config.yaml`、`run.sh`，其他第一层文件都会进入 generic trainFiles。比如目录里有：
+| 参数 | 必填 | 说明 |
+|------|------|------|
+| `--name` | 是 | 新任务名称 |
+| `--source` | 是 | 源码目录路径 |
+| `--template-id` | 否 | 模板任务 ID，完整的 taskID 字符串，如 `angel_training_ams_...`。可省略，在 submit 时指定 |
+| `--description` | 否 | 任务描述 |
+| `--include` | 否 | 逗号分隔的包含模式，如 `"*.py,*.sh"` |
+| `--exclude` | 否 | 逗号分隔的排除模式，默认排除 `__pycache__`、`*.pyc`、`*.egg-info`、`.git`、`.DS_Store`、`inference/` |
+| `--output` | 否 | 输出目录，默认 `submit-bundle` |
 
-```text
-taiji-files/
-  dataset.py
-  model.py
-  ns_groups.json
-  run.sh
-  train.py
-  trainer.py
-  utils.py
-```
+**扫描规则：**
 
-就会准备覆写同名 `run.sh`，以及 `dataset.py/model.py/ns_groups.json/train.py/trainer.py/utils.py` 这些散文件。子目录会被忽略，避免不小心把项目目录整体传上去。
+- 递归扫描源码目录中的 `.py`、`.sh`、`.json`、`.yaml`、`.yml`、`.toml`、`.txt`、`.cfg`、`.ini` 文件
+- 包含 `inference/` 子目录
+- 排除 `__pycache__`、`*.pyc`、`inference/` 等模式
 
-也可以单独列文件：
+**产出文件（位于输出目录）：**
 
-```bash
-taac2026 train prepare \
-  --template-job-url "https://taiji.algo.qq.com/training/..." \
-  --zip "./submits/0505/V1.4.0/code.zip" \
-  --config "./submits/0505/V1.4.0/config.yaml" \
-  --run-sh "./submits/0505/V1.4.0/run.sh" \
-  --file "./main.py" \
-  --file "./local_dataset.py=dataset.py" \
-  --name "v1.4.0_mixed_files"
-```
+| 文件 | 说明 |
+|------|------|
+| `manifest.json` | 清单文件，包含模板 ID、任务名称、文件列表、Git 信息 |
+| `NEXT_STEPS.md` | 下一步操作指南 |
+| `files/` | 源码文件副本（保持相对路径结构） |
 
-`--file ./main.py` 会按 basename 替换模板里的 `main.py`；`--file ./local_dataset.py=dataset.py` 会把本地文件上传后替换模板里的 `dataset.py`。`code.zip`、`config.yaml`、`run.sh` 是一等文件名，不能通过 `--file` 传，必须使用 `--zip`、`--config`、`--run-sh`，或让 `--file-dir` 自动识别。
+**调用的 API：** 无（纯本地操作）
 
-准备一个提交包：
+---
 
-```bash
-taac2026 train prepare \
-  --template-job-url "https://taiji.algo.qq.com/training/..." \
-  --zip "./submits/0505/V1.4.0/code.zip" \
-  --config "./submits/0505/V1.4.0/config.yaml" \
-  --run-sh "./submits/0505/V1.4.0/run.sh" \
-  --name "v1.4.0_item_reinit" \
-  --description "item id reinit + dense transform" \
-  --run
-```
+### `train submit` — 上传并创建训练任务
 
-不传 `--run-sh` 时会沿用模板 Job 里的旧 `run.sh`。
+将 prepare 产生的 bundle 上传到 COS，然后通过 Create Job API 创建训练任务。
 
-它会写入：
-
-```text
-taiji-output/submit-bundle/
-  manifest.json
-  NEXT_STEPS.md
-  files/code.zip
-  files/config.yaml
-  files/run.sh        # 仅在传入 --run-sh 时存在
-  files/generic/...   # 仅在传入 --file 或 --file-dir 发现散文件时存在
-```
-
-生成 dry-run 提交计划：
+**用法：**
 
 ```bash
 taac2026 train submit \
-  --bundle taiji-output/submit-bundle \
-  --cookie-file taiji-output/secrets/taiji-cookie.txt \
-  --template-job-internal-id <TEMPLATE_JOB_INTERNAL_ID>
+  --bundle <bundle目录> \
+  [--template-id <模板任务ID>] \
+  [--gpu-num <GPU卡数>] \
+  [--yes] \
+  [--dry-run] \
+  [--output <输出目录>]
 ```
 
-真实上传并创建 Job：
+| 参数 | 必填 | 说明 |
+|------|------|------|
+| `--bundle` | 是 | `prepare` 生成的 bundle 目录路径 |
+| `--template-id` | 条件 | 模板任务 ID。如果 bundle 的 manifest.json 中未包含，则必填 |
+| `--yes` | 否 | 跳过确认提示 |
+| `--gpu-num` | 否 | GPU 卡数（默认使用模板配置） |
+| `--dry-run` | 否 | 仅生成计划，不执行上传和创建 |
+| `--output` | 否 | 输出目录，默认 `taiji-output/submit-live/<时间戳>` |
+
+**调用的 API：**
+
+1. `GET /aide/api/evaluation_tasks/get_federation_token/` — 获取 COS 联邦令牌
+2. `GET /taskmanagement/api/v1/webtasks/external/task/{internalId}` — 获取模板任务元信息
+3. `PUT COS` — 将每个文件上传到腾讯云对象存储（Bucket: `hunyuan-external-1258344706`, Region: `ap-guangzhou`）
+4. `POST /taskmanagement/api/v1/webtasks/external/task` — 创建新训练任务
+
+**产出文件（位于输出目录）：**
+
+| 文件 | 说明 |
+|------|------|
+| `plan.json` | 执行计划（含上传文件列表、COS 路径、创建参数） |
+| `result.json` | 执行结果（含 taskId、上传详情、创建响应） |
+
+---
+
+### `train run` — 启动训练任务
+
+启动已创建但未运行的训练任务。
+
+**用法：**
 
 ```bash
-taac2026 train submit \
-  --bundle taiji-output/submit-bundle \
-  --cookie-file taiji-output/secrets/taiji-cookie.txt \
-  --template-job-internal-id <TEMPLATE_JOB_INTERNAL_ID> \
-  --execute --yes
+taac2026 train run \
+  --task-id <任务ID> \
+  [--output <输出目录>]
 ```
 
-上传、创建并启动训练：
+| 参数 | 必填 | 说明 |
+|------|------|------|
+| `--task-id` | 是 | 完整的 taskID 字符串（`angel_training_...`）或数字内部 ID |
+| `--output` | 否 | 输出目录，默认 `taiji-output/train-jobs` |
+
+**调用的 API：**
+
+- `POST /taskmanagement/api/v1/webtasks/{taskId}/start` — 启动训练任务
+
+**产出文件：**
+
+| 文件 | 说明 |
+|------|------|
+| `taiji-output/train-jobs/run-{taskId}.json` | 启动结果，含 taskId 和响应数据 |
+
+---
+
+### `train list` — 列出训练任务
+
+获取训练任务列表，支持增量模式只拉取变更的任务。
+
+**用法：**
 
 ```bash
-taac2026 train submit \
-  --bundle taiji-output/submit-bundle \
-  --cookie-file taiji-output/secrets/taiji-cookie.txt \
-  --template-job-internal-id <TEMPLATE_JOB_INTERNAL_ID> \
-  --execute --yes --run
+taac2026 train list \
+  [--headless] \
+  [--incremental] \
+  [--page-size <n>] \
+  [--output <输出目录>] \
+  [--timeout <ms>]
 ```
 
-只有用户明确要启动训练时才加 `--run`；普通上传验证先用上一段 create-only 命令。
+| 参数 | 必填 | 说明 |
+|------|------|------|
+| `--headless` | 否 | 无头浏览器模式（适合 CI/CD） |
+| `--incremental` | 否 | 增量模式，跳过未变更的已结束任务 |
+| `--page-size` | 否 | 每页条数，默认 100 |
+| `--output` | 否 | 输出目录，默认 `taiji-output` |
+| `--timeout` | 否 | 浏览器超时时间（毫秒），默认 180000 |
 
-如果模板 Job 里没有同名 `code.zip`、`config.yaml`，或在传入 `--run-sh` / `--file` / `--file-dir` 时没有对应同名 trainFile，脚本会默认报错，避免旧文件和新文件同时存在。只有明确要新增 trainFiles 时才加：
+**调用的 API：**
+
+- `GET /taskmanagement/api/v1/webtasks/external/task` — 分页获取训练任务列表（需通过浏览器认证）
+
+**产出文件：**
+
+| 文件 | 说明 |
+|------|------|
+| `taiji-output/jobs.json` | 任务详情（含 jobId、jobInternalId 的映射） |
+| `taiji-output/jobs-summary.csv` | 任务摘要（CSV 格式） |
+
+---
+
+### `train describe` — 查看任务详情
+
+获取训练任务的完整信息，包括实例详情、日志、指标和检查点。
+
+**用法：**
 
 ```bash
-taac2026 train submit ... --execute --yes --allow-add-file
+taac2026 train describe \
+  --job-id <任务ID> \
+  [--output <输出目录>]
+
+# 或查看所有任务
+taac2026 train describe --all [--output <输出目录>]
 ```
 
-## 安全默认值
+| 参数 | 必填 | 说明 |
+|------|------|------|
+| `--job-id` | 条件必填 | 完整的 taskID 字符串。与 `--all` 互斥 |
+| `--all` | 条件必填 | 从 jobs.json 读取所有任务。与 `--job-id` 互斥 |
+| `--output` | 否 | 输出目录，默认 `taiji-output/train-jobs` |
 
-- Cookie、HAR、headers 建议放在 `taiji-output/secrets/` 或 `taiji-output/har/`，不要提交。
-- 所有脚本默认把本地产物写到 `taiji-output/`。
-- 相对输出路径不能包含 `..`；如果确实要写到外部位置，请使用绝对路径。
-- `taac2026 train submit` 默认 dry-run。
-- 真实平台写操作必须显式加 `--execute --yes`。
-- 启动训练必须额外显式加 `--run`。
-- 脚本会保留模板 Job 的环境、镜像和入口；默认严格替换模板中已有的 `code.zip` 和 `config.yaml`，传入 `--run-sh` 时才严格替换同名 `run.sh`，传入 `--file` 或 `--file-dir` 时才严格替换对应通用文件。
+**调用的 API：**
 
-## 输出目录
+1. `GET /taskmanagement/api/v1/webtasks/external/task/{internalId}` — 获取任务详情
+2. `POST /taskmanagement/api/v1/instances/list` — 获取任务下的所有实例
+3. `GET /taskmanagement/api/v1/instances/external/{instanceId}/get_ckpt` — 获取检查点信息
+4. `GET /taskmanagement/api/v1/instances/external/{instanceId}/tf_events` — 获取训练指标（TensorFlow events）
+5. `GET /taskmanagement/api/v1/instances/{instanceId}/pod_log` — 获取 Pod 日志
 
-```text
+**产出文件：**
+
+| 文件 | 说明 |
+|------|------|
+| `taiji-output/train-jobs/job-{taskId}.json` | 任务详情（含所有实例信息） |
+| `taiji-output/train-jobs/job-{taskId}-metrics.csv` | 训练指标（loss、AUC 等） |
+| `taiji-output/train-jobs/job-{taskId}-checkpoints.csv` | 检查点列表 |
+| `taiji-output/train-jobs/logs/{taskId}/{instanceId}.json` | 原始日志（JSON） |
+| `taiji-output/train-jobs/logs/{taskId}/{instanceId}.txt` | 格式化日志（文本） |
+
+---
+
+### `train logs` — 查看训练日志
+
+获取训练任务所有实例的 Pod 日志。
+
+**用法：**
+
+```bash
+taac2026 train logs \
+  --job-id <任务ID> \
+  [--output <输出目录>]
+```
+
+| 参数 | 必填 | 说明 |
+|------|------|------|
+| `--job-id` | 是 | 完整的 taskID 字符串（`angel_training_...`） |
+| `--output` | 否 | 输出目录，默认 `taiji-output/train-jobs` |
+
+**调用的 API：**
+
+1. `POST /taskmanagement/api/v1/instances/list` — 获取任务实例列表
+2. `GET /taskmanagement/api/v1/instances/{instanceId}/pod_log` — 获取每个实例的 Pod 日志
+
+**产出文件：**
+
+| 文件 | 说明 |
+|------|------|
+| `taiji-output/train-jobs/logs/{taskId}/{instanceId}.json` | 原始日志（JSON） |
+| `taiji-output/train-jobs/logs/{taskId}/{instanceId}.txt` | 格式化日志（文本） |
+
+---
+
+### `train metrics` — 查看训练指标
+
+获取训练任务的指标数据（loss、AUC 等）。
+
+**用法：**
+
+```bash
+taac2026 train metrics \
+  --job-id <任务ID> \
+  [--json] \
+  [--output <输出目录>]
+```
+
+| 参数 | 必填 | 说明 |
+|------|------|------|
+| `--job-id` | 是 | 完整的 taskID 字符串（`angel_training_...`） |
+| `--json` | 否 | 输出 JSON 到标准输出，而非写入 CSV 文件 |
+| `--output` | 否 | 输出目录，默认 `taiji-output/train-jobs/metrics` |
+
+**调用的 API：**
+
+1. `POST /taskmanagement/api/v1/instances/list` — 获取任务实例列表
+2. `GET /taskmanagement/api/v1/instances/external/{instanceId}/tf_events` — 获取训练指标
+3. `GET /taskmanagement/api/v1/instances/external/{instanceId}/get_ckpt` — 获取检查点信息（内部调用 fetchInstanceOutput）
+
+**产出文件：**
+
+| 文件 | 说明 |
+|------|------|
+| `taiji-output/train-jobs/metrics/metrics-job-{taskId}.csv` | 训练指标 CSV（仅非 `--json` 模式） |
+
+---
+
+### `train stop` — 停止训练任务
+
+通过杀死运行中的实例来停止训练任务。
+
+**用法：**
+
+```bash
+taac2026 train stop \
+  --task-id <任务ID> \
+  [--output <输出目录>]
+```
+
+| 参数 | 必填 | 说明 |
+|------|------|------|
+| `--task-id` | 是 | 完整的 taskID 字符串（`angel_training_...`）。实例 ID 自动从 API 解析 |
+| `--output` | 否 | 输出目录，默认 `taiji-output/train-jobs` |
+
+**调用的 API：**
+
+1. `POST /taskmanagement/api/v1/instances/list` — 获取任务实例列表（取第一个实例）
+2. `POST /taskmanagement/api/v1/instances/{instanceId}/kill` — 杀死实例
+
+**产出文件：**
+
+| 文件 | 说明 |
+|------|------|
+| `taiji-output/train-jobs/stop-{taskId}.json` | 停止结果（含 taskId、instanceId、响应数据） |
+
+---
+
+### `train delete` — 删除训练任务
+
+永久删除训练任务。需要数字内部 ID。
+
+**用法：**
+
+```bash
+taac2026 train delete \
+  --job-internal-id <数字内部ID> \
+  [--yes]
+```
+
+| 参数 | 必填 | 说明 |
+|------|------|------|
+| `--job-internal-id` | 是 | 数字内部 ID（如 `74958`），不是 taskID 字符串。可在 `jobs.json` 或 submit 的 `result.json` 中查看 |
+| `--yes` | 否 | 跳过确认提示 |
+
+**调用的 API：**
+
+- `DELETE /taskmanagement/api/v1/webtasks/external/task/{internalId}` — 删除训练任务
+
+**产出文件：** 无（仅在控制台打印结果）
+
+---
+
+## 评估任务（eval）
+
+### `eval list` — 列出评估任务
+
+获取评估任务列表，并自动抓取每个任务的日志。
+
+**用法：**
+
+```bash
+taac2026 eval list \
+  [--page-size <n>] \
+  [--output <输出目录>]
+```
+
+| 参数 | 必填 | 说明 |
+|------|------|------|
+| `--page-size` | 否 | 每页条数，默认 100 |
+| `--output` | 否 | 输出目录，默认 `taiji-output` |
+
+**调用的 API：**
+
+1. `GET /aide/api/evaluation_tasks/` — 分页获取评估任务列表
+2. `GET /aide/api/evaluation_tasks/event_log/` — 获取每个任务的日志
+
+**产出文件：**
+
+| 文件 | 说明 |
+|------|------|
+| `taiji-output/eval-tasks.json` | 评估任务详情（含所有任务日志） |
+| `taiji-output/eval-tasks-summary.csv` | 评估任务摘要（CSV 格式） |
+| `taiji-output/eval-jobs/logs/{taskId}.json` | 单个任务原始日志（JSON） |
+| `taiji-output/eval-jobs/logs/{taskId}.txt` | 单个任务格式化日志（文本） |
+
+---
+
+### `eval logs` — 查看评估日志
+
+获取单个评估任务的日志。
+
+**用法：**
+
+```bash
+taac2026 eval logs \
+  --task-id <任务ID> \
+  [--output <输出目录>]
+```
+
+| 参数 | 必填 | 说明 |
+|------|------|------|
+| `--task-id` | 是 | 评估任务 ID（从 `eval list` 输出中获取） |
+| `--output` | 否 | 输出目录，默认 `taiji-output/eval-jobs/logs` |
+
+**调用的 API：**
+
+- `GET /aide/api/evaluation_tasks/event_log/` — 获取指定任务的日志
+
+**产出文件：**
+
+| 文件 | 说明 |
+|------|------|
+| `{outputDir}/{taskId}.json` | 原始日志（JSON） |
+| `{outputDir}/{taskId}.txt` | 格式化日志（文本） |
+
+---
+
+### `eval metrics` — 查看评估指标
+
+获取评估任务的指标数据（score、AUC 等）。
+
+**用法：**
+
+```bash
+taac2026 eval metrics \
+  --task-id <任务ID> \
+  [--json] \
+  [--output <输出目录>]
+```
+
+| 参数 | 必填 | 说明 |
+|------|------|------|
+| `--task-id` | 是 | 评估任务 ID（从 `eval list` 输出中获取） |
+| `--json` | 否 | 输出 JSON 到标准输出，而非写入文件 |
+| `--output` | 否 | 输出目录，默认 `taiji-output/eval-jobs/metrics` |
+
+**调用的 API：**
+
+- `GET /aide/api/evaluation_tasks/` — 获取评估任务列表（从中查找指定任务）
+
+**产出文件：**
+
+| 文件 | 说明 |
+|------|------|
+| `{outputDir}/{taskId}.json` | 指标数据（仅非 `--json` 模式） |
+
+---
+
+## 输出目录结构
+
+所有命令的输出文件默认存放在 `taiji-output/` 目录下：
+
+```
 taiji-output/
-  jobs.json
-  jobs-summary.csv
-  all-checkpoints.csv
-  all-metrics-long.csv
-  eval-tasks.json
-  eval-tasks-summary.csv
-  browser-profile/
-  code/<jobId>/
-  config-diffs/
-  eval-logs/<task_id>/
-  logs/<jobId>/
-  secrets/
-  submit-bundle/
-  submit-live/<timestamp>/
+├── jobs.json                          # 训练任务列表映射
+├── jobs-summary.csv                   # 训练任务摘要
+├── submit-live/                       # 提交结果（按时间戳分目录）
+│   └── YYYY-MM-DDTHH-MM-SS/
+│       ├── plan.json
+│       └── result.json
+├── train-jobs/
+│   ├── job-{taskId}.json              # 任务详情
+│   ├── job-{taskId}-metrics.csv       # 训练指标
+│   ├── job-{taskId}-checkpoints.csv   # 检查点
+│   ├── run-{taskId}.json              # 启动结果
+│   ├── stop-{taskId}.json             # 停止结果
+│   ├── logs/
+│   │   └── {taskId}/
+│   │       ├── {instanceId}.json      # 原始日志
+│   │       └── {instanceId}.txt       # 格式化日志
+│   └── metrics/
+│       └── metrics-job-{taskId}.csv   # 指标 CSV
+├── eval-tasks.json                    # 评估任务详情
+├── eval-tasks-summary.csv             # 评估任务摘要
+└── eval-jobs/
+    ├── logs/
+    │   └── {taskId}.json              # 评估日志
+    │   └── {taskId}.txt
+    └── metrics/
+        └── {taskId}.json              # 评估指标
 ```
 
-推荐在业务仓库里加入：
+---
 
-```gitignore
-taiji-output/
-```
+## 关于 ID 类型
 
-## 什么时候使用
+平台中存在两种任务 ID：
 
-适合这些场景：
+| ID 类型 | 示例 | 说明 |
+|---------|------|------|
+| **taskID（字符串）** | `angel_training_ams_2026_...` | 完整的任务标识符，用于 `run`、`stop`、`logs`、`metrics`、`describe` 等命令 |
+| **jobInternalId（数字）** | `74958` | 数字内部 ID，仅用于 `delete` 命令和 API 路径中 |
 
-- 想让 agent 总结一批 Taiji Job 的训练指标。
-- 想比较两个实验版本的 `config.yaml`。
-- 想把每个 Job 的代码、日志、checkpoint 和指标归档起来。
-- 想查看所有 Evaluation 评测任务的 score、infer_time 和 event log。
-- 想用一个已成功的模板 Job 自动提交下一组代码和配置。
-- 想让 agent 先整理历史实验的证据，再由人和 agent 共同判断下一步策略。
-
-不适合这些场景：
-
-- Cookie 已经过期或被出口 IP / 浏览器指纹绑定。
-- 平台接口发生变化且没有新的 DevTools 请求样本。
-- 需要完全无人工确认地消耗线上训练资源。
-
-## 项目结构
-
-```
-src/
-├── api/                 # HTTP 客户端、训练 API、评测 API、COS 上传
-├── auth/                # Cookie 管理、浏览器 SSO 登录
-├── cli/
-│   ├── index.ts         # CLI 入口（program.parse）
-│   └── commands/        # train/ 和 eval/ 子命令
-├── config/              # 参数默认值与解析
-├── utils/               # 输出路径管理、格式化
-├── scrape/              # 抓取逻辑
-└── types.ts             # 共享 TypeScript 类型
-```
-
-## 脚本清单
-
-| 入口 | 用途 |
-| --- | --- |
-| `bin/taac2026.mjs` | 统一 CLI 入口，转发到 `dist/cli/index.js` |
-| `dist/cli/index.js` | TypeScript 编译后的 CLI 入口（`taac2026` 命令实际执行文件） |
-| `src/cli/commands/` | 所有 train/eval 子命令的 TypeScript 源码 |
-| `scripts/scrape-taiji.mjs` | 旧版抓取脚本（兼容保留，推荐迁移到 `taac2026 train list`） |
-| `scripts/compare-config-yaml.mjs` | 旧版配置比较（兼容保留，推荐迁移到 `taac2026 train config-diff`） |
-| `scripts/prepare-taiji-submit.mjs` | 旧版提交准备（兼容保留，推荐迁移到 `taac2026 train prepare`） |
-| `scripts/submit-taiji.mjs` | 旧版提交执行（兼容保留，推荐迁移到 `taac2026 train submit`） |
-| `scripts/experiment-tools.mjs` | 旧版实验工具（兼容保留，推荐迁移到对应 `taac2026 train` 子命令） |
-
-## 故障判断
-
-- `401` / `403`：Cookie 过期、缺失，或登录态绑定了出口环境。
-- Playwright 失败但 `--direct` 成功：优先用 `--direct`。
-- 两种模式都 `401`：先在同一机器上测试完整 `Copy as cURL`。
-- Job 有实例但指标为空：可能是任务失败、实例未产出 metrics，或平台响应结构变化。
-- 代码文件下载失败：先看 `code/<jobId>/job-detail.json` 和 `train-files.json`。脚本会优先把 `trainFiles[].path` 当 COS key，用 federation token 下载；如果拿到平台前端 HTML、zip 魔数不对、`config.yaml` 不是 mapping，或大小不匹配，会标为失败而不是悄悄保存假文件。
-
-## 开发验证
-
-```bash
-npm run build
-npm run check
-npm run test
-```
-
-`build` 编译 TypeScript 到 `dist/`。`check` 会对所有 bundled scripts 执行 `node --check`；`test` 会跑 CLI 冒烟测试。
+在 `jobs.json` 中，`jobId` 对应 taskID，`jobInternalId` 对应数字内部 ID。

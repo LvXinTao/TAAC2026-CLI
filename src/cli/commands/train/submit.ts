@@ -151,14 +151,14 @@ interface CreatePayload {
   trainFiles: Array<{ name: string; path: string; mtime: string; size: number }>;
 }
 
-function buildCreatePayload(template: Record<string, unknown>, jobName: string, jobDescription: string, trainFiles: Array<{ name: string; path: string; mtime: string; size: number }>): CreatePayload {
+function buildCreatePayload(template: Record<string, unknown>, jobName: string, jobDescription: string, trainFiles: Array<{ name: string; path: string; mtime: string; size: number }>, gpuNum?: number): CreatePayload {
   return {
     templateId: template.templateId as number,
     name: jobName,
     description: jobDescription,
     modelName: (template.modelName as string) ?? "Baseline Model Name",
     trainDataName: (template.trainDataName as string) ?? "TencentGR",
-    hostGpuNum: (template.hostGpuNum as number) ?? 1,
+    hostGpuNum: gpuNum ?? (template.hostGpuNum as number) ?? 1,
     label: (template.label as string) ?? "",
     trainFiles,
   };
@@ -174,8 +174,10 @@ function safeResult(result: unknown): unknown {
 export function registerTrainSubmitCommand(trainCmd: Command) {
   trainCmd
     .command("submit")
-    .description("Upload bundle to COS and create a new training job. The template ID is read from the bundle manifest.")
+    .description("Upload bundle to COS and create a new training job. The template ID is read from the bundle manifest or --template-id.")
     .requiredOption("--bundle <dir>", "Prepared bundle directory")
+    .option("--template-id <id>", "Template job ID — override the template ID from bundle manifest")
+    .option("--gpu-num <n>", "Number of GPUs (default: from template)")
     .option("--yes", "Skip confirmation prompt", false)
     .option("--dry-run", "Preview without uploading", false)
     .option("--output <dir>", "Output directory for plan/result")
@@ -185,9 +187,12 @@ export function registerTrainSubmitCommand(trainCmd: Command) {
       const outDir = resolveTaijiOutputDir(opts.output ?? defaultOut);
       const { manifest, files: bundleFiles } = await loadBundle(bundleDir);
 
+      // Override manifest templateId with CLI option if provided
+      if (opts.templateId) manifest.templateJobId = String(opts.templateId);
+
       // Resolve template internal ID
       const templateJobInternalId = resolveTemplateInternalId(manifest, bundleDir);
-      if (!templateJobInternalId) throw new Error("Cannot determine template job ID from manifest. Run `prepare` again with a valid `--template-id`.");
+      if (!templateJobInternalId) throw new Error("Cannot determine template job ID. Provide --template-id or include it in the bundle manifest.");
 
       // Job name/description from manifest
       const jobRecord = (manifest.job as Record<string, string> | undefined) ?? {};
@@ -230,7 +235,7 @@ export function registerTrainSubmitCommand(trainCmd: Command) {
 
       const createPayload = buildCreatePayload(templateData, job.name, job.description, trainFiles.map((f) => ({
         name: f.name, path: f.cosKey, mtime: f.mtime, size: f.size,
-      })));
+      })), opts.gpuNum ? parseInt(opts.gpuNum, 10) : undefined);
 
       const plan = {
         mode,

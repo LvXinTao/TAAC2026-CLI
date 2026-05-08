@@ -237,6 +237,9 @@ Current options (lines 126-138):
 Replace with:
 ```typescript
 .requiredOption("--template-id <id>", "Template job URL or internal ID")
+```
+
+**Note**: The option value can be either a full URL (`https://taiji.algo.qq.com/training?id=12345`) or just the internal ID (`12345`). The code uses `inferInternalId` from submit.ts to extract the numeric ID. In prepare, store the raw value as-is in manifest for now — submit will parse it.
 .requiredOption("--name <name>", "Job name")
 .option("--zip <path>", "Path to code.zip")
 .option("--config <path>", "Path to config.yaml")
@@ -266,8 +269,8 @@ if (!codeZip && !config && !runSh) {
 - [ ] **Step 3: Remove `--message`, `--run`, `--allow-dirty` from action**
 
 - Remove `opts.message` references from manifest (line 182)
-- Remove `opts.run` → remove `runAfterSubmit` from manifest (line 181)
-- Remove `opts.allowDirty` check (lines 157-159) and the `getGitInfo` dirty flag (keep git info for head/branch but remove dirty status)
+- Remove `opts.run` → remove `runAfterSubmit` from manifest (line 181). **Note**: submit.ts Task 15 in the plan previously read `manifest.runAfterSubmit` — since we removed it, submit.ts should NOT reference `manifest.runAfterSubmit` anymore. The `--run` flag on submit is the only way to trigger auto-start now.
+- Remove `opts.allowDirty` check (lines 157-159) and the `getGitInfo` dirty flag
 
 - [ ] **Step 4: Update `--out` → `--output` in action**
 
@@ -323,6 +326,7 @@ Replace with:
 - `if (!opts.dryRun && !opts.yes) throw new Error("--dry-run is not set; add --yes to confirm live execution")`
 - Remove the `!opts.cookieFile` early return — auth is now global
 - Always write plan.json (both dry-run and execute)
+- **Remove** any reference to `manifest.runAfterSubmit` in the plan object — the `--run` flag on submit is now the only way to trigger auto-start
 
 - [ ] **Step 3: Remove `--cookie-file` usage**
 
@@ -346,10 +350,12 @@ Remove `createDirectClient` import if no longer needed.
 
 - [ ] **Step 4: Remove template-job-internal-id and template-job-url from action**
 
-Remove line 179-180 options. The internal ID is now inferred from the bundle manifest only.
+Remove line 179-180 options. The internal ID is now read from the bundle manifest only:
 - Remove `opts.templateJobUrl` references (line 193)
-- Keep using `inferInternalId(templateJobUrl)` from manifest only
+- Replace with: `const templateJobUrl = manifest.templateJobUrl as string;` and `const templateJobInternalId = inferInternalId(templateJobUrl);`
 - Remove `opts.templateJobInternalId` override (line 194)
+
+If `inferInternalId(templateJobUrl)` returns empty string, throw a clear error: "Cannot determine template job ID from manifest. Run `prepare` again with a valid `--template-id`."
 
 - [ ] **Step 5: Remove name/description overrides**
 
@@ -409,8 +415,7 @@ The current `runScrape` function (lines 89-240) fetches job detail, instances, l
 - Write `jobs-summary.csv` with list-level data
 - Remove: `fetchJobDetail`, `fetchJobInstances`, `fetchInstanceOutput`, `fetchInstanceLog` calls
 - Remove: `all-metrics-long.csv` and `all-checkpoints.csv` output
-- Remove: `readJsonIfExists` incremental sync logic (lines 41-47, 96-97, 113-125)
-  - Keep `--incremental` but for now make it skip duplicate jobs by taskID
+- For `--incremental`: check if `jobs.json` already exists. If so, read existing job IDs and skip re-fetching jobs already in the file. If `--incremental` is not set, overwrite everything.
 
 - [ ] **Step 3: Remove auth-related options from action**
 

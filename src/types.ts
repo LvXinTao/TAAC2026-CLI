@@ -160,10 +160,3 @@ export interface ConfigDiffResult {
   changes: ConfigChange[];
 }
 
-export interface SharedCliOptions {
-  cookieFile?: string;
-  direct?: boolean;
-  headless?: boolean;
-  outDir?: string;
-  json?: boolean;
-}

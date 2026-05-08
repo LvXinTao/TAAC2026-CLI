@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import type { CookieEntry, DirectClient } from "../types.js";
+import { ensureCliAuth } from "../cli/middleware.js";
 
 export function extractCookieHeader(fileContent: string): string {
   const text = fileContent.trim();
@@ -54,7 +55,7 @@ export function isDirectClient(client: unknown): client is DirectClient {
   return Boolean((client as DirectClient)?.directCookieHeader);
 }
 
-export async function ensureAuthenticated(cookieFile?: string): Promise<DirectClient> {
-  if (!cookieFile) throw new Error("--cookie-file is required for this command");
-  return createDirectClient(cookieFile);
+export async function ensureAuthenticated(_unused?: string): Promise<DirectClient> {
+  const cookieHeader = await ensureCliAuth();
+  return { directCookieHeader: cookieHeader };
 }

@@ -1,7 +1,7 @@
 import { Command } from "commander";
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { ensureAuthenticated } from "../../../auth/token.js";
+import { ensureCliAuth } from "../../../cli/middleware.js";
 import { fetchEvaluationLog } from "../../../api/evaluation.js";
 import { resolveTaijiOutputDir } from "../../../utils/output.js";
 
@@ -10,13 +10,11 @@ export function registerEvalLogsCommand(evalCmd: Command) {
     .command("logs")
     .description("View evaluation task logs")
     .requiredOption("--task-id <id>", "Evaluation task ID")
-    .option("--cookie-file <file>", "Cookie file")
-    .option("--direct", "Use backend HTTP")
-    .option("--out <dir>", "Output directory")
+    .option("--output <dir>", "Output directory (default: taiji-output)")
     .action(async (opts) => {
-      if (!opts.direct) throw new Error("--direct is required for now");
-      const outDir = resolveTaijiOutputDir(opts.out ?? "taiji-output");
-      const client = await ensureAuthenticated(opts.cookieFile);
+      const outDir = resolveTaijiOutputDir(opts.output ?? "taiji-output");
+      const cookieHeader = await ensureCliAuth();
+      const client = { directCookieHeader: cookieHeader };
       const logResponse = await fetchEvaluationLog(client, opts.taskId);
       const logList = ((logResponse as Record<string, unknown>)?.data as Record<string, unknown> | undefined)?.list as unknown[] | undefined ?? [];
       const logDir = path.join(outDir, "eval-logs");

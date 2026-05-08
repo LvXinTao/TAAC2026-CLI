@@ -1,7 +1,7 @@
 import { Command } from "commander";
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { ensureAuthenticated } from "../../../auth/token.js";
+import { ensureCliAuth } from "../../../cli/middleware.js";
 import { fetchEvaluationTasks, fetchEvaluationLog } from "../../../api/evaluation.js";
 import { resolveTaijiOutputDir } from "../../../utils/output.js";
 import { toCsv } from "../../../utils/format.js";
@@ -10,14 +10,12 @@ export function registerEvalListCommand(evalCmd: Command) {
   evalCmd
     .command("list")
     .description("Scrape evaluation task list")
-    .option("--cookie-file <file>", "Cookie file")
-    .option("--direct", "Use backend HTTP")
-    .option("--page-size <n>", "Page size", (v) => parseInt(v, 10))
-    .option("--out <dir>", "Output directory")
+    .option("--page-size <n>", "Page size", (v: string) => parseInt(v, 10))
+    .option("--output <dir>", "Output directory (default: taiji-output)")
     .action(async (opts) => {
-      if (!opts.direct) throw new Error("--direct is required for now");
-      const outDir = resolveTaijiOutputDir(opts.out ?? "taiji-output");
-      const client = await ensureAuthenticated(opts.cookieFile);
+      const outDir = resolveTaijiOutputDir(opts.output ?? "taiji-output");
+      const cookieHeader = await ensureCliAuth();
+      const client = { directCookieHeader: cookieHeader };
       const tasks = await fetchEvaluationTasks(client, opts.pageSize ?? 100);
       console.log(`Found ${tasks.length} evaluation tasks`);
 

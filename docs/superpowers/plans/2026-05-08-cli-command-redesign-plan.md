@@ -188,7 +188,7 @@ git commit -m "refactor(login): simplify to browser-only auth, save to .taac2026
 ### Task 3: Update tests for login and auth
 
 **Files:**
-- Modify: `tests/auth.test.mjs` (update cookie file path references)
+- Modify: `scripts/tests/auth.test.mjs` (update cookie file path references)
 
 - [ ] **Step 1: Read existing test, update if it references old paths**
 
@@ -950,7 +950,7 @@ git commit -m "refactor(eval commands): use global auth, remove dead options"
 ### Task 14: Update CLI tests
 
 **Files:**
-- Modify: `tests/cli.test.mjs` (at `scripts/tests/cli.test.mjs`)
+- Modify: `scripts/tests/cli.test.mjs`
 
 - [ ] **Step 1: Update tests to match new options**
 
@@ -1047,26 +1047,19 @@ git commit -m "test: update CLI tests for new command structure"
 
 ---
 
-## Chunk 8: Submit `--dry-run` default behavior correction
+## Chunk 8: Final verification and cleanup
 
-### Task 15: Correct the submit --dry-run default
+### Task 15: Verify submit --dry-run default behavior
 
-The spec says default should be **execute** (not dry-run), but `--yes` is still required for safety. This means:
+The spec says default should be **execute** (not dry-run), but `--yes` is still required for safety. This is already handled in Task 5 step 2.
+
+- [ ] **Step 1: Verify the submit action handles all three cases correctly**
 
 - Without any flags: errors out asking for `--yes` or `--dry-run`
 - With `--dry-run`: shows plan, no upload
 - With `--yes`: executes live
 
-- [ ] **Step 1: Update submit action to handle the case where neither --yes nor --dry-run is set**
-
-```typescript
-if (!opts.dryRun && !opts.yes) {
-  console.log("This will create a live job. Use --dry-run to preview, or --yes to confirm.");
-  process.exit(1);
-}
-```
-
-This is already covered in Task 5 step 2.
+Confirm the code in Task 5 step 2 covers this. No changes needed.
 
 - [ ] **Step 2: Commit**
 

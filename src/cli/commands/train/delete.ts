@@ -1,5 +1,5 @@
 import { Command } from "commander";
-import { ensureAuthenticated } from "../../../auth/token.js";
+import { ensureCliAuth } from "../../../cli/middleware.js";
 import { fetchJson } from "../../../api/client.js";
 
 export function registerTrainDeleteCommand(trainCmd: Command) {
@@ -7,10 +7,10 @@ export function registerTrainDeleteCommand(trainCmd: Command) {
     .command("delete")
     .description("Delete a training job")
     .requiredOption("--job-id <id>", "Job internal ID to delete")
-    .option("--cookie-file <file>", "Cookie file path")
     .option("--yes", "Skip confirmation prompt", false)
     .action(async (opts) => {
-      const client = await ensureAuthenticated(opts.cookieFile);
+      const cookieHeader = await ensureCliAuth();
+      const client = { directCookieHeader: cookieHeader };
       const jobId = opts.jobId;
 
       if (!opts.yes) {

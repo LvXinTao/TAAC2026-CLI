@@ -4,7 +4,7 @@ import { existsSync } from "node:fs";
 import path from "node:path";
 import { ensureCliAuth } from "../../../cli/middleware.js";
 import { resolveTaijiOutputDir } from "../../../utils/output.js";
-import { fetchJobInstances, fetchInstanceOutput, releaseCheckpoint } from "../../../api/training.js";
+import { fetchJobInstances, fetchInstanceOutput, releaseCheckpoint, fetchMoulds } from "../../../api/training.js";
 
 function findTaijiOutputDir(fromDir: string): string | null {
   let current = fromDir;
@@ -102,12 +102,20 @@ export function registerTrainPublishCommand(trainCmd: Command) {
         desc: publishDesc,
         ckpt: ckptFilename,
       });
-
-      // Extract mould_id from response for downstream evaluation tasks
       const responseData = response as Record<string, any>;
-      const mouldId = responseData?.data?.mould_id ?? responseData?.data?.model_id ?? responseData?.data?.id ?? responseData?.mould_id ?? responseData?.model_id ?? null;
+      const releaseOk = !responseData?.error?.code || responseData.error.code === "SUCCESS";
 
-      // Step 6: Verify
+      // Step 6: Look up mould_id from the platform's mould list
+      const moulds = await fetchMoulds(client);
+      const matchingMoulds = moulds.results.filter(
+        (m: any) => m.task_id === opts.taskId && m.instance_id === instanceId
+      );
+      // Sort by create_time descending to get the most recent
+      matchingMoulds.sort((a: any, b: any) => (b.create_time || "").localeCompare(a.create_time || ""));
+      const mouldId = matchingMoulds.length > 0 ? matchingMoulds[0].id : null;
+      const mouldName = matchingMoulds.length > 0 ? matchingMoulds[0].name : null;
+
+      // Step 7: Verify checkpoint still exists
       const verifyOutput = await fetchInstanceOutput(client, instanceId);
       const verifyCheckpoints = (verifyOutput as Record<string, any>).checkpoints as any[];
       const verified = verifyCheckpoints?.some((c: any) => c.ckpt === ckptFilename || c.name === ckptFilename);
@@ -119,6 +127,7 @@ export function registerTrainPublishCommand(trainCmd: Command) {
         publishName,
         publishDesc,
         mouldId,
+        mouldName,
         publishedAt: new Date().toISOString(),
         response,
         verified: verified ?? null,
@@ -127,12 +136,12 @@ export function registerTrainPublishCommand(trainCmd: Command) {
       await mkdir(outDir, { recursive: true });
       await writeFile(path.join(outDir, `publish-${opts.taskId}.json`), JSON.stringify(result, null, 2), "utf8");
 
-      if (mouldId) {
+      if (!releaseOk) {
+        console.log(`Checkpoint already published: ${publishName} (mould_id: ${mouldId ?? "not found"})`);
+      } else if (mouldId) {
         console.log(`Checkpoint published: ${publishName} (mould_id: ${mouldId})`);
-      } else if (verified) {
-        console.log(`Checkpoint published and verified: ${publishName}`);
       } else {
-        console.log(`Checkpoint published: ${publishName} (verification inconclusive, may be async)`);
+        console.log(`Checkpoint published: ${publishName} (mould lookup pending, may take a few seconds)`);
       }
     });
 }

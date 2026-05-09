@@ -135,3 +135,31 @@ export async function releaseCheckpoint(
     authWaitMs,
   });
 }
+
+export interface MouldEntry {
+  id: number;
+  name: string;
+  desc: string;
+  create_time: string;
+  update_time: string;
+  task_int_id: string;
+  task_id: string;
+  instance_id: string;
+}
+
+export async function fetchMoulds(
+  client: unknown,
+  options?: { page?: number; pageSize?: number; authWaitMs?: number }
+): Promise<{ count: number; results: MouldEntry[] }> {
+  const page = options?.page ?? 1;
+  const pageSize = options?.pageSize ?? 100;
+  const response = await fetchJson(client, `/aide/api/external/mould/`, {
+    params: { page, page_size: pageSize },
+    authWaitMs: options?.authWaitMs,
+  });
+  const data = response as Record<string, any>;
+  return {
+    count: data?.count ?? 0,
+    results: Array.isArray(data?.results) ? data.results : [],
+  };
+}

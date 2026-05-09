@@ -24,10 +24,10 @@ npm link
 标准工作流程：
 
 ```
-prepare → submit → run
+prepare → submit → run → publish
 ```
 
-即：先打包源码，再上传到 COS 并创建训练任务，最后启动训练。
+即：先打包源码，再上传到 COS 并创建训练任务，然后启动训练，训练完成后发布 checkpoint 获取 `mould_id` 用于评估任务。
 
 ### `train prepare` — 准备提交包
 
@@ -336,6 +336,42 @@ taac2026 train delete \
 
 ---
 
+### `train publish` — 发布 checkpoint 并获取 mould_id
+
+训练完成后，发布最新 checkpoint 为模型（mould），并自动查询返回 `mould_id`，供下游评估任务创建时使用。
+
+**用法：**
+
+```bash
+taac2026 train publish \
+  --task-id <任务ID> \
+  [--name <发布名称>] \
+  [--desc <发布描述>] \
+  [--output <输出目录>]
+```
+
+| 参数 | 必填 | 说明 |
+|------|------|------|
+| `--task-id` | 是 | 完整的 taskID 字符串（`angel_training_...`）或数字内部 ID |
+| `--name` | 否 | 发布名称，默认为 `<任务名>-step<N>`，N 从 checkpoint 文件名中提取 |
+| `--desc` | 否 | 发布描述，默认为 `Published from training task <task_id>` |
+| `--output` | 否 | 输出目录，默认 `taiji-output/train-jobs` |
+
+**调用的 API：**
+
+1. `POST /taskmanagement/api/v1/instances/list` — 获取任务实例列表（取最新一个）
+2. `GET /taskmanagement/api/v1/instances/external/{instanceId}/get_ckpt` — 获取 checkpoint 列表
+3. `POST /taskmanagement/api/v1/instances/external/{instanceId}/release_ckpt` — 发布 checkpoint
+4. `GET /aide/api/external/mould/` — 查询模型列表，通过 task_id + instance_id 匹配得到 `mould_id`
+
+**产出文件：**
+
+| 文件 | 说明 |
+|------|------|
+| `taiji-output/train-jobs/publish-{taskId}.json` | 发布结果，含 `mouldId`、`mouldName`、checkpoint 文件名、响应数据 |
+
+---
+
 ## 评估任务（eval）
 
 ### `eval list` — 列出评估任务
@@ -450,6 +486,7 @@ taiji-output/
 │   ├── job-{taskId}-checkpoints.csv   # 检查点
 │   ├── run-{taskId}.json              # 启动结果
 │   ├── stop-{taskId}.json             # 停止结果
+│   ├── publish-{taskId}.json          # 发布结果（含 mould_id）
 │   ├── logs/
 │   │   └── {taskId}/
 │   │       ├── {instanceId}.json      # 原始日志

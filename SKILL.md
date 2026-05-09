@@ -1,7 +1,7 @@
 ---
 name: taac2026-cli
 description: >
-  Reference guide for the taac2026 CLI — a Node.js command-line tool for managing training and evaluation tasks on the TAAC2026 / Taiji platform. Use whenever the user mentions taac2026, Taiji, training tasks, evaluation tasks, task submission, model training on Taiji, COS upload for training, job management on the Taiji platform, or asks about any taac2026 subcommand (login, train prepare/submit/run/list/describe/logs/metrics/stop/delete, eval list/logs/metrics). Also use when debugging CLI errors, authentication issues, API calls, or output file paths related to this project.
+  Reference guide for the taac2026 CLI — a Node.js command-line tool for managing training and evaluation tasks on the TAAC2026 / Taiji platform. Use whenever the user mentions taac2026, Taiji, training tasks, evaluation tasks, task submission, model training on Taiji, COS upload for training, job management on the Taiji platform, or asks about any taac2026 subcommand (login, train prepare/submit/run/list/describe/logs/metrics/stop/delete/publish, eval list/logs/metrics). Also use when debugging CLI errors, authentication issues, API calls, or output file paths related to this project.
 ---
 
 # TAAC2026 CLI Reference
@@ -30,12 +30,13 @@ Save your Taiji cookie as `.taac2026/secrets/taiji-cookie.txt`. All subsequent c
 The standard training task lifecycle:
 
 ```
-train prepare → train submit → train run
+train prepare → train submit → train run → train publish
 ```
 
 1. **prepare** — Scan source code, create a bundle with `manifest.json`
 2. **submit** — Upload bundle to COS (Tencent Cloud Object Storage), create training task via API
 3. **run** — Start the created (but not yet running) training task
+4. **publish** — Release the latest checkpoint as a model (mould), get `mould_id` for downstream evaluation tasks
 
 ### Command Reference
 
@@ -160,6 +161,22 @@ taac2026 train delete --job-internal-id <numericId> [--yes]
 - API: `DELETE /taskmanagement/api/v1/webtasks/external/task/{internalId}`
 - No output file (prints to console)
 
+#### `train publish` — Publish checkpoint & get mould_id
+
+After training completes, release the latest checkpoint as a model (mould) on the platform. The `mould_id` is required for creating downstream evaluation tasks.
+
+```bash
+taac2026 train publish --task-id <taskId> [--name <name>] [--desc <desc>] [--output taiji-output/train-jobs]
+```
+
+- **APIs called** (in order):
+  1. `POST /taskmanagement/api/v1/instances/list` — find the latest instance
+  2. `GET /taskmanagement/api/v1/instances/external/{instanceId}/get_ckpt` — list checkpoints, pick latest
+  3. `POST /taskmanagement/api/v1/instances/external/{instanceId}/release_ckpt` — release checkpoint
+  4. `GET /aide/api/external/mould/` — query model list to find matching `mould_id` by task_id + instance_id
+- Auto-generated publish name: `<task_name>-step<N>` (N extracted from checkpoint filename)
+- Output: `publish-{taskId}.json` (includes `mouldId`, `mouldName` for eval task creation)
+
 ---
 
 ## Evaluation Tasks (eval)
@@ -226,6 +243,7 @@ taiji-output/
 │   ├── job-{taskId}-checkpoints.csv   # Checkpoints
 │   ├── run-{taskId}.json              # Run result
 │   ├── stop-{taskId}.json             # Stop result
+│   ├── publish-{taskId}.json          # Publish result (incl. mould_id for eval)
 │   ├── logs/{taskId}/{instanceId}.{json,txt}  # Pod logs
 │   └── metrics/metrics-job-{taskId}.csv       # Metrics CSV
 ├── eval-tasks.json                    # Eval task details (with logs)
@@ -254,6 +272,8 @@ taiji-output/
 | `POST /taskmanagement/api/v1/instances/{instanceId}/kill` | Cookie | Kill instance |
 | `GET /taskmanagement/api/v1/instances/external/{instanceId}/tf_events` | Cookie | Get training metrics |
 | `GET /taskmanagement/api/v1/instances/external/{instanceId}/get_ckpt` | Cookie | Get checkpoint info |
+| `POST /taskmanagement/api/v1/instances/external/{instanceId}/release_ckpt` | Cookie | Publish checkpoint as model |
+| `GET /aide/api/external/mould/` | Cookie | List published models (get mould_id) |
 
 ---
 

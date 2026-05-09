@@ -57,13 +57,19 @@ function formatTaijiTime(date = new Date()): string {
   return `${bj.getFullYear()}-${pad(bj.getMonth() + 1)}-${pad(bj.getDate())} ${pad(bj.getHours())}:${pad(bj.getMinutes())}:${pad(bj.getSeconds())}`;
 }
 
-function inferAccountPrefix(creator: string): string {
-  // creator is like "ams_2026_1029731852466346144"
-  return creator || "";
-}
-
 function newCosKey(prefix: string, filename: string): string {
   return `${prefix}/infer/local--${randomUUID().replaceAll("-", "")}/${filename}`;
+}
+
+function inferCreatorFromTaskId(taskId: string): string {
+  // task_id format: angel_training_ams_2026_xxx_timestamp_hash
+  // creator: ams_2026_xxx
+  const parts = taskId.split("_");
+  const amsIdx = parts.findIndex((p) => p === "ams");
+  if (amsIdx >= 0 && amsIdx + 2 < parts.length) {
+    return parts.slice(amsIdx, amsIdx + 3).join("_");
+  }
+  return "";
 }
 
 async function getFederationToken(cookieHeader: string) {
@@ -126,17 +132,22 @@ export function registerEvalSubmitCommand(evalCmd: Command) {
       // Auth
       const cookieHeader = await ensureCliAuth();
 
-      // Fetch template defaults (creator, image_name)
+      // Fetch mould list to get creator/account prefix from first mould's task_id
+      const mouldList = await fetchJson(cookieHeader, "/aide/api/external/mould/?page=1&page_size=1");
+      const mouldRows = (mouldList.results as Array<Record<string, unknown>> | undefined) ?? [];
+      let creator = "";
+      if (mouldRows.length > 0) {
+        creator = inferCreatorFromTaskId(mouldRows[0].task_id as string | undefined ?? "");
+      }
+
+      // Fetch template defaults (image_name, inferFiles for reference)
       const template = await fetchJson(cookieHeader, "/aide/api/evaluation_tasks/get_template/");
-      // Response may be { data: {...} } or direct object
       const templateData = (template.data as Record<string, unknown> | undefined) ?? template;
-      const creator = (templateData.creator as string | undefined) ?? "";
       const imageName = (templateData.image_name as string | undefined) ?? "";
 
-      // Build COS prefix: {YEAR}_AMS_ALGO_Competition/{account_prefix}
-      const accountPrefix = inferAccountPrefix(creator);
+      // Build COS prefix: {YEAR}_AMS_ALGO_Competition/{creator}/infer/local--uuid/filename
       const basePrefix = `${new Date().getFullYear()}_AMS_ALGO_Competition`;
-      const cosPrefix = accountPrefix ? `${basePrefix}/${accountPrefix}` : basePrefix;
+      const cosPrefix = creator ? `${basePrefix}/${creator}` : basePrefix;
       const uploadFiles = bundleFiles.map((f) => ({
         name: f.name,
         cosKey: newCosKey(cosPrefix, f.name),

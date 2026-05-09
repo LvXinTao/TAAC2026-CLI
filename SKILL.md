@@ -1,14 +1,14 @@
 ---
 name: taac2026-cli
 description: >
-  Reference guide for the taac2026 CLI — a Node.js command-line tool for managing training and evaluation tasks on the TAAC2026 / Taiji platform. Use whenever the user mentions taac2026, Taiji, training tasks, evaluation tasks, task submission, model training on Taiji, COS upload for training, job management on the Taiji platform, or asks about any taac2026 subcommand (login, train prepare/submit/run/list/describe/logs/metrics/stop/delete/publish, eval list/logs/metrics). Also use when debugging CLI errors, authentication issues, API calls, or output file paths related to this project.
+  Reference guide for the taac2026 CLI — a Node.js command-line tool for managing training and evaluation tasks on the TAAC2026 / Taiji platform. Use whenever the user mentions taac2026, Taiji, training tasks, evaluation tasks, task submission, model training on Taiji, COS upload for training, job management on the Taiji platform, or asks about any taac2026 subcommand (login, train prepare/submit/run/list/describe/logs/metrics/stop/delete/publish, eval prepare/submit/list/logs/metrics). Also use when debugging CLI errors, authentication issues, API calls, or output file paths related to this project.
 ---
 
 # TAAC2026 CLI Reference
 
 ## Overview
 
-`taac2026` is a Node.js CLI (`commander`-based) for managing experiments on the TAAC2026 / Taiji platform. It handles authentication, training task lifecycle (prepare → submit → run), and evaluation task management.
+`taac2026` is a Node.js CLI (`commander`-based) for managing experiments on the TAAC2026 / Taiji platform. It handles authentication, training task lifecycle (prepare → submit → run), and evaluation task lifecycle (prepare → submit).
 
 **Binary**: `taac2026` (from `dist/cli/index.js` after `npm run build`)
 **Dev**: `npm run dev` runs via `tsx` without building.
@@ -181,6 +181,58 @@ taac2026 train publish --task-id <taskId> [--name <name>] [--desc <desc>] [--out
 
 ## Evaluation Tasks (eval)
 
+### Workflow
+
+```
+eval prepare → eval submit
+```
+
+1. **prepare** — Scan eval code, create a bundle with `manifest.json`
+2. **submit** — Upload bundle to COS, create evaluation task via API
+
+#### `eval prepare` — Prepare submission bundle
+
+Pure local operation, no API calls.
+
+```bash
+taac2026 eval prepare \
+  --name <task-name> \
+  --source <source-dir> \
+  [--description <desc>] \
+  [--include "*.py,*.sh"] \
+  [--exclude "*.pyc,__pycache__"] \
+  [--output eval-bundle]
+```
+
+- **Scans** for `.py`, `.sh`, `.json`, `.yaml`, `.yml`, `.toml`, `.txt`, `.cfg`, `.ini`
+- **Excludes** `__pycache__`, `*.pyc`, `*.egg-info`, `.git`, `.DS_Store` by default
+- **Outputs**:
+  - `manifest.json` — task name, file list, git info
+  - `NEXT_STEPS.md` — next steps guide
+  - `files/` — source file copies (relative paths preserved)
+
+#### `eval submit` — Upload to COS & create eval task
+
+```bash
+taac2026 eval submit \
+  --bundle <bundle-dir> \
+  --mould-id <mould-id> \
+  [--yes] \
+  [--dry-run] \
+  [--output taiji-output/eval-submit-live/<timestamp>]
+```
+
+- **`--mould-id`** is required — obtained from `train publish` output (`publish-{taskId}.json` 中的 `mouldId` 字段)
+- **APIs called** (in order):
+  1. `GET /aide/api/evaluation_tasks/get_template/` — get `creator` and `image_name` defaults
+  2. `GET /aide/api/evaluation_tasks/get_federation_token/` — COS federation token
+  3. `PUT COS` — upload each file to `hunyuan-external-1258344706` bucket, `ap-guangzhou` region, path: `{YEAR}_AMS_ALGO_Competition/{creator}/infer/local--{uuid}/{filename}`
+  4. `POST /aide/api/evaluation_tasks/` — create evaluation task
+- **Outputs**:
+  - `plan.json` — execution plan (upload list, COS paths, creation params)
+  - `result.json` — execution result (taskId, upload details, creation response)
+- COS key format uses `infer/local--{uuid}/` (not `train/`), with account prefix from `creator` field
+
 #### `eval list` — List eval tasks with logs
 
 ```bash
@@ -234,6 +286,10 @@ You can find both in `taiji-output/jobs.json` (`jobId` = taskID, `jobInternalId`
 taiji-output/
 ├── jobs.json                          # Training task list mapping
 ├── jobs-summary.csv                   # Training task summary
+├── submit-bundle/                     # Train prepare bundles
+│   ├── manifest.json
+│   ├── NEXT_STEPS.md
+│   └── files/
 ├── submit-live/YYYY-MM-DDTHH-MM-SS/   # Submit results (per timestamp)
 │   ├── plan.json
 │   └── result.json
@@ -247,6 +303,13 @@ taiji-output/
 │   │   └── publish-{taskId}.json      # Publish result (incl. mould_id for eval)
 │   ├── logs/{taskId}/{instanceId}.{json,txt}  # Pod logs
 │   └── metrics/metrics-job-{taskId}.csv       # Metrics CSV
+├── eval-bundle/                       # Eval prepare bundles
+│   ├── manifest.json
+│   ├── NEXT_STEPS.md
+│   └── files/
+├── eval-submit-live/YYYY-MM-DDTHH-MM-SS/  # Eval submit results (per timestamp)
+│   ├── plan.json
+│   └── result.json
 ├── eval-tasks.json                    # Eval task details (with logs)
 ├── eval-tasks-summary.csv             # Eval task summary
 └── eval-jobs/

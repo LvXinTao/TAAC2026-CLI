@@ -442,7 +442,7 @@ taac2026 eval submit \
 | 参数 | 必填 | 说明 |
 |------|------|------|
 | `--bundle` | 是 | `prepare` 生成的 bundle 目录路径 |
-| `--mould-id` | 是 | 模型 ID（通过 train publish 获得） |
+| `--mould-id` | 是 | 模型 ID。通过 `train publish` 获得，结果在 `taiji-output/train-jobs/ckpt/publish-{taskId}.json` 的 `mouldId` 字段中 |
 | `--yes` | 否 | 跳过确认提示 |
 | `--dry-run` | 否 | 仅生成计划，不执行上传和创建 |
 | `--output` | 否 | 输出目录，默认 `taiji-output/eval-submit-live/<时间戳>` |

@@ -87,6 +87,11 @@ function makeNextSteps(manifest: Record<string, unknown>) {
   return `${lines.join("\n")}\n`;
 }
 
+function uniqueName(base: string): string {
+  const ts = Date.now();
+  return `${base}_${ts}`;
+}
+
 export function registerEvalPrepareCommand(evalCmd: Command) {
   evalCmd
     .command("prepare")
@@ -143,7 +148,7 @@ export function registerEvalPrepareCommand(evalCmd: Command) {
         schemaVersion: 1,
         createdAt: new Date().toISOString(),
         sourceDir: opts.source,
-        job: { name: opts.name, description: opts.description || "" },
+        job: { name: uniqueName(opts.name), description: opts.description || "" },
         files: fileEntries,
         git,
       };

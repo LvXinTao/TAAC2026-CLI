@@ -36,3 +36,12 @@ export async function createEvaluationTask(client: unknown, payload: Record<stri
     body: payload,
   });
 }
+
+export async function fetchEvaluationTemplate(
+  client: unknown,
+  authWaitMs?: number,
+): Promise<Record<string, unknown>> {
+  return fetchJson(client, "/aide/api/evaluation_tasks/get_template/", {
+    authWaitMs,
+  });
+}

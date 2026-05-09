@@ -52,9 +52,9 @@ export function registerTrainPublishCommand(trainCmd: Command) {
     .requiredOption("--task-id <id>", "Task ID — full taskID string (angel_training_...) or numeric internal ID")
     .option("--name <name>", "Publish name (default: <task_name>-step<N>, extracted from checkpoint filename)")
     .option("--desc <desc>", "Publish description (default: 'Published from training task <task_id>')")
-    .option("--output <dir>", "Output directory for result JSON (default: taiji-output/train-jobs)")
+    .option("--output <dir>", "Output directory for result JSON (default: taiji-output/train-jobs/ckpt)")
     .action(async (opts) => {
-      const outDir = resolveTaijiOutputDir(opts.output ?? "taiji-output/train-jobs");
+      const outDir = resolveTaijiOutputDir(opts.output ?? "taiji-output/train-jobs/ckpt");
       const cookieHeader = await ensureCliAuth();
       const client = { directCookieHeader: cookieHeader };
 

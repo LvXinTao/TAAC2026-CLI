@@ -175,7 +175,7 @@ taac2026 train publish --task-id <taskId> [--name <name>] [--desc <desc>] [--out
   3. `POST /taskmanagement/api/v1/instances/external/{instanceId}/release_ckpt` — release checkpoint
   4. `GET /aide/api/external/mould/` — query model list to find matching `mould_id` by task_id + instance_id
 - Auto-generated publish name: `<task_name>-step<N>` (N extracted from checkpoint filename)
-- Output: `publish-{taskId}.json` (includes `mouldId`, `mouldName` for eval task creation)
+- Output: `publish-{taskId}.json` under `train-jobs/ckpt/` (includes `mouldId`, `mouldName` for eval task creation)
 
 ---
 
@@ -243,7 +243,8 @@ taiji-output/
 │   ├── job-{taskId}-checkpoints.csv   # Checkpoints
 │   ├── run-{taskId}.json              # Run result
 │   ├── stop-{taskId}.json             # Stop result
-│   ├── publish-{taskId}.json          # Publish result (incl. mould_id for eval)
+│   ├── ckpt/
+│   │   └── publish-{taskId}.json      # Publish result (incl. mould_id for eval)
 │   ├── logs/{taskId}/{instanceId}.{json,txt}  # Pod logs
 │   └── metrics/metrics-job-{taskId}.csv       # Metrics CSV
 ├── eval-tasks.json                    # Eval task details (with logs)

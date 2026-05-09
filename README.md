@@ -355,7 +355,7 @@ taac2026 train publish \
 | `--task-id` | 是 | 完整的 taskID 字符串（`angel_training_...`）或数字内部 ID |
 | `--name` | 否 | 发布名称，默认为 `<任务名>-step<N>`，N 从 checkpoint 文件名中提取 |
 | `--desc` | 否 | 发布描述，默认为 `Published from training task <task_id>` |
-| `--output` | 否 | 输出目录，默认 `taiji-output/train-jobs` |
+| `--output` | 否 | 输出目录，默认 `taiji-output/train-jobs/ckpt` |
 
 **调用的 API：**
 
@@ -368,7 +368,7 @@ taac2026 train publish \
 
 | 文件 | 说明 |
 |------|------|
-| `taiji-output/train-jobs/publish-{taskId}.json` | 发布结果，含 `mouldId`、`mouldName`、checkpoint 文件名、响应数据 |
+| `taiji-output/train-jobs/ckpt/publish-{taskId}.json` | 发布结果，含 `mouldId`、`mouldName`、checkpoint 文件名、响应数据 |
 
 ---
 
@@ -486,7 +486,8 @@ taiji-output/
 │   ├── job-{taskId}-checkpoints.csv   # 检查点
 │   ├── run-{taskId}.json              # 启动结果
 │   ├── stop-{taskId}.json             # 停止结果
-│   ├── publish-{taskId}.json          # 发布结果（含 mould_id）
+│   ├── ckpt/
+│   │   └── publish-{taskId}.json      # 发布结果（含 mould_id）
 │   ├── logs/
 │   │   └── {taskId}/
 │   │       ├── {instanceId}.json      # 原始日志

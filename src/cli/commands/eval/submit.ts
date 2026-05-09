@@ -57,16 +57,13 @@ function formatTaijiTime(date = new Date()): string {
   return `${bj.getFullYear()}-${pad(bj.getMonth() + 1)}-${pad(bj.getDate())} ${pad(bj.getHours())}:${pad(bj.getMinutes())}:${pad(bj.getSeconds())}`;
 }
 
-function inferCosPrefix(templateFiles: Array<{ path: string }>): string {
-  for (const file of templateFiles) {
-    const match = file.path.match(/^(.+?)\/(?:common\/)?(?:template|train)\//);
-    if (match) return match[1];
-  }
-  throw new Error("Cannot infer COS prefix from template files");
+function inferAccountPrefix(creator: string): string {
+  // creator is like "ams_2026_1029731852466346144"
+  return creator || "";
 }
 
 function newCosKey(prefix: string, filename: string): string {
-  return `${prefix}/train/local--${randomUUID().replaceAll("-", "")}/${filename}`;
+  return `${prefix}/infer/local--${randomUUID().replaceAll("-", "")}/${filename}`;
 }
 
 async function getFederationToken(cookieHeader: string) {
@@ -129,16 +126,17 @@ export function registerEvalSubmitCommand(evalCmd: Command) {
       // Auth
       const cookieHeader = await ensureCliAuth();
 
-      // Fetch template defaults (creator, image_name, and COS path prefix)
+      // Fetch template defaults (creator, image_name)
       const template = await fetchJson(cookieHeader, "/aide/api/evaluation_tasks/get_template/");
       // Response may be { data: {...} } or direct object
       const templateData = (template.data as Record<string, unknown> | undefined) ?? template;
       const creator = (templateData.creator as string | undefined) ?? "";
       const imageName = (templateData.image_name as string | undefined) ?? "";
 
-      // Infer COS prefix from template files
-      const templateFiles = ((templateData.files as Array<{ path: string }>) || []).map((f) => ({ path: f.path }));
-      let cosPrefix = templateFiles.length > 0 ? inferCosPrefix(templateFiles) : `${new Date().getFullYear()}_AMS_ALGO_Competition/common`;
+      // Build COS prefix: {YEAR}_AMS_ALGO_Competition/{account_prefix}
+      const accountPrefix = inferAccountPrefix(creator);
+      const basePrefix = `${new Date().getFullYear()}_AMS_ALGO_Competition`;
+      const cosPrefix = accountPrefix ? `${basePrefix}/${accountPrefix}` : basePrefix;
       const uploadFiles = bundleFiles.map((f) => ({
         name: f.name,
         cosKey: newCosKey(cosPrefix, f.name),

@@ -66,7 +66,7 @@ function inferCosPrefix(templateFiles: Array<{ path: string }>): string {
 }
 
 function newCosKey(prefix: string, filename: string): string {
-  return `${prefix}/eval/local--${randomUUID().replaceAll("-", "")}/${filename}`;
+  return `${prefix}/train/local--${randomUUID().replaceAll("-", "")}/${filename}`;
 }
 
 async function getFederationToken(cookieHeader: string) {

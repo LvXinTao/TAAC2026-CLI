@@ -1,4 +1,4 @@
-import type { TrainingJob, JobInstance, JobDetail } from "../types.js";
+import type { TrainingJob, JobInstance, JobDetail, ReleaseCkptRequest } from "../types.js";
 import { fetchJson, type FetchOptions } from "./client.js";
 
 function extractRows(response: unknown): unknown[] {
@@ -120,5 +120,18 @@ function normalizeMetricRows(metricName: string, payload: unknown): any[] {
       }
     }
     return rows;
+  });
+}
+
+export async function releaseCheckpoint(
+  client: unknown,
+  instanceId: string,
+  request: ReleaseCkptRequest,
+  authWaitMs?: number
+): Promise<unknown> {
+  return fetchJson(client, `/taskmanagement/api/v1/instances/external/${instanceId}/release_ckpt`, {
+    method: "POST",
+    body: request,
+    authWaitMs,
   });
 }

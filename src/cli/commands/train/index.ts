@@ -8,6 +8,7 @@ import { registerTrainDeleteCommand } from "./delete.js";
 import { registerTrainPrepareCommand } from "./prepare.js";
 import { registerTrainRunCommand } from "./run.js";
 import { registerTrainSubmitCommand } from "./submit.js";
+import { registerTrainPublishCommand } from "./publish.js";
 
 export function registerTrainCommand(program: Command) {
   const trainCmd = program.command("train").description("Manage training tasks. Typical workflow: prepare -> submit -> run");
@@ -20,4 +21,5 @@ export function registerTrainCommand(program: Command) {
   registerTrainMetricsCommand(trainCmd);
   registerTrainStopCommand(trainCmd);
   registerTrainDeleteCommand(trainCmd);
+  registerTrainPublishCommand(trainCmd);
 }

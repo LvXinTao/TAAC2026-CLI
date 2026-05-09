@@ -160,3 +160,16 @@ export interface ConfigDiffResult {
   changes: ConfigChange[];
 }
 
+export interface CheckpointInfo {
+  name?: string;
+  ckpt?: string;
+  createTime?: string;
+  [key: string]: unknown;
+}
+
+export interface ReleaseCkptRequest {
+  name: string;
+  desc: string;
+  ckpt: string;
+}
+

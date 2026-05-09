@@ -13,9 +13,13 @@ npm link
 
 ## 认证
 
-所有命令均需要 Cookie 认证。使用前请先手动保存：
+所有命令均需要 Cookie 认证。使用前请先手动保存。操作步骤：
 
-将 Taiji 平台的 Cookie 保存为 `.taac2026/secrets/taiji-cookie.txt` 文件，后续命令会自动读取该文件进行认证。
+1. 打开算法平台，按F12，并点击“网络”，点击网页上任意按钮后会出现请求。右键点击“复制值”->“复制cURL”。
+
+<img src="./assets/step1.png" alt="curl" style="width: 50%;">
+
+2. 将复制的cURL粘贴给你的Agent，让它提取出Cookie并保存到 `./.taac2026/secrets/taiji-cookie.txt` 文件，后续命令会自动读取该文件进行认证。
 
 ---
 

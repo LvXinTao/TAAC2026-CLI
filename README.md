@@ -374,6 +374,95 @@ taac2026 train publish \
 
 ## 评估任务（eval）
 
+标准工作流程：
+
+```
+prepare → submit
+```
+
+即：先打包源码，再上传到 COS 并创建评估任务。
+
+### `eval prepare` — 准备提交包
+
+从源码目录扫描评估代码文件，准备一个可提交的 bundle。
+
+**用法：**
+
+```bash
+taac2026 eval prepare \
+  --name <任务名称> \
+  --source <源码目录> \
+  [--description <描述>] \
+  [--include <包含模式>] \
+  [--exclude <排除模式>] \
+  [--output <输出目录>]
+```
+
+| 参数 | 必填 | 说明 |
+|------|------|------|
+| `--name` | 是 | 新任务名称 |
+| `--source` | 是 | 源码目录路径 |
+| `--description` | 否 | 任务描述 |
+| `--include` | 否 | 逗号分隔的包含模式，如 `"*.py,*.sh"` |
+| `--exclude` | 否 | 逗号分隔的排除模式，默认排除 `__pycache__`、`*.pyc`、`*.egg-info`、`.git`、`.DS_Store` |
+| `--output` | 否 | 输出目录，默认 `eval-bundle` |
+
+**扫描规则：**
+
+- 递归扫描源码目录中的 `.py`、`.sh`、`.json`、`.yaml`、`.yml`、`.toml`、`.txt`、`.cfg`、`.ini` 文件
+- 所有子目录都会被递归扫描
+
+**产出文件（位于输出目录）：**
+
+| 文件 | 说明 |
+|------|------|
+| `manifest.json` | 清单文件，包含任务名称、文件列表、Git 信息 |
+| `NEXT_STEPS.md` | 下一步操作指南 |
+| `files/` | 源码文件副本（保持相对路径结构） |
+
+**调用的 API：** 无（纯本地操作）
+
+---
+
+### `eval submit` — 上传并创建评估任务
+
+将 prepare 产生的 bundle 上传到 COS，然后通过 API 创建评估任务。
+
+**用法：**
+
+```bash
+taac2026 eval submit \
+  --bundle <bundle目录> \
+  --mould-id <模型ID> \
+  [--yes] \
+  [--dry-run] \
+  [--output <输出目录>]
+```
+
+| 参数 | 必填 | 说明 |
+|------|------|------|
+| `--bundle` | 是 | `prepare` 生成的 bundle 目录路径 |
+| `--mould-id` | 是 | 模型 ID（通过 train publish 获得） |
+| `--yes` | 否 | 跳过确认提示 |
+| `--dry-run` | 否 | 仅生成计划，不执行上传和创建 |
+| `--output` | 否 | 输出目录，默认 `taiji-output/eval-submit-live/<时间戳>` |
+
+**调用的 API：**
+
+1. `GET /aide/api/evaluation_tasks/get_template/` — 获取评估默认模板（获取 creator、image_name）
+2. `GET /aide/api/evaluation_tasks/get_federation_token/` — 获取 COS 联邦令牌
+3. `PUT COS` — 将每个文件上传到腾讯云对象存储（Bucket: `hunyuan-external-1258344706`, Region: `ap-guangzhou`）
+4. `POST /aide/api/evaluation_tasks/` — 创建新评估任务
+
+**产出文件（位于输出目录）：**
+
+| 文件 | 说明 |
+|------|------|
+| `plan.json` | 执行计划（含上传文件列表、COS 路径、创建参数） |
+| `result.json` | 执行结果（含 taskId、上传详情、创建响应） |
+
+---
+
 ### `eval list` — 列出评估任务
 
 获取评估任务列表，并自动抓取每个任务的日志。
@@ -476,6 +565,10 @@ taac2026 eval metrics \
 taiji-output/
 ├── jobs.json                          # 训练任务列表映射
 ├── jobs-summary.csv                   # 训练任务摘要
+├── submit-bundle/                     # 训练准备包
+│   ├── manifest.json
+│   ├── NEXT_STEPS.md
+│   └── files/
 ├── submit-live/                       # 提交结果（按时间戳分目录）
 │   └── YYYY-MM-DDTHH-MM-SS/
 │       ├── plan.json
@@ -494,6 +587,14 @@ taiji-output/
 │   │       └── {instanceId}.txt       # 格式化日志
 │   └── metrics/
 │       └── metrics-job-{taskId}.csv   # 指标 CSV
+├── eval-bundle/                       # 评估准备包
+│   ├── manifest.json
+│   ├── NEXT_STEPS.md
+│   └── files/
+├── eval-submit-live/                  # 评估提交结果（按时间戳分目录）
+│   └── YYYY-MM-DDTHH-MM-SS/
+│       ├── plan.json
+│       └── result.json
 ├── eval-tasks.json                    # 评估任务详情
 ├── eval-tasks-summary.csv             # 评估任务摘要
 └── eval-jobs/

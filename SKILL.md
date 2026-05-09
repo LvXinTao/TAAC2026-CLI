@@ -204,6 +204,7 @@ taac2026 eval prepare \
   [--output eval-bundle]
 ```
 
+- **Auto-appends timestamp** to job name (e.g. `my_eval_1778312663555`) to avoid duplicate-name 500 from server
 - **Scans** for `.py`, `.sh`, `.json`, `.yaml`, `.yml`, `.toml`, `.txt`, `.cfg`, `.ini`
 - **Excludes** `__pycache__`, `*.pyc`, `*.egg-info`, `.git`, `.DS_Store` by default
 - **Outputs**:

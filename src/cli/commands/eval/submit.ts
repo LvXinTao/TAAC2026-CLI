@@ -153,12 +153,14 @@ export function registerEvalSubmitCommand(evalCmd: Command) {
         cosKey: newCosKey(cosPrefix, f.name),
         localPath: f.localPath,
         size: 0, // filled by stat below
+        mtime: formatTaijiTime(), // filled by stat below
       }));
 
-      // Get file sizes
+      // Get file sizes and mtimes
       for (const f of uploadFiles) {
         const s = await stat(f.localPath);
         f.size = s.size;
+        f.mtime = s.mtime.toISOString().replace("T", " ").slice(0, 19);
       }
 
       const mode = opts.dryRun ? "dry-run" : "execute";
@@ -176,7 +178,7 @@ export function registerEvalSubmitCommand(evalCmd: Command) {
         files: uploadFiles.map((f) => ({
           name: f.name,
           path: f.cosKey,
-          mtime: formatTaijiTime(),
+          mtime: f.mtime || formatTaijiTime(),
           size: f.size,
         })),
       };
@@ -210,9 +212,10 @@ export function registerEvalSubmitCommand(evalCmd: Command) {
         method: "POST",
         body: createPayload,
       });
-      const data = (created as Record<string, unknown>).data as Record<string, unknown> | undefined;
+      // Response may be { data: {...} } or direct { id: ... }
+      const data = (created.data as Record<string, unknown> | undefined) ?? created;
       const taskId = data?.id;
-      if (!taskId) throw new Error("Created evaluation task response has no data.id");
+      if (!taskId) throw new Error(`Created evaluation task response has no id. Response keys: ${Object.keys(created as Record<string, unknown>).join(", ")}`);
 
       const result = { ...plan, uploadResults, created: safeResult(created), taskId };
       await writeFile(path.join(outDir, "result.json"), `${JSON.stringify(result, null, 2)}\n`, "utf8");

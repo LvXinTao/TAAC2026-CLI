@@ -54,7 +54,7 @@ taac2026 train prepare \
 |------|------|------|
 | `--name` | 是 | 新任务名称 |
 | `--source` | 是 | 源码目录路径 |
-| `--template-id` | 否 | 模板任务 ID，完整的 taskID 字符串，如 `angel_training_ams_...`。可省略，在 submit 时指定 |
+| `--template-id` | 否 | 模板任务的内部数字 ID（jobInternalId），如 `92380`。**不是**完整的 taskId 字符串（如 `angel_training_ams_...`）。可在 `taiji-output/jobs.json` 中找到：`jobsById[taskId].jobInternalId`。可省略，在 submit 时指定 |
 | `--description` | 否 | 任务描述 |
 | `--include` | 否 | 逗号分隔的包含模式，如 `"*.py,*.sh"` |
 | `--exclude` | 否 | 逗号分隔的排除模式，默认排除 `__pycache__`、`*.pyc`、`*.egg-info`、`.git`、`.DS_Store`、`inference/` |
@@ -97,7 +97,7 @@ taac2026 train submit \
 | 参数 | 必填 | 说明 |
 |------|------|------|
 | `--bundle` | 是 | `prepare` 生成的 bundle 目录路径 |
-| `--template-id` | 条件 | 模板任务 ID。如果 bundle 的 manifest.json 中未包含，则必填 |
+| `--template-id` | 条件 | 模板任务的内部数字 ID（jobInternalId），如 `92380`。**不是**完整的 taskId 字符串。可在 `taiji-output/jobs.json` → `jobsById[taskId].jobInternalId` 中找到。如果 bundle 的 manifest.json 中未包含，则必填 |
 | `--yes` | 否 | 跳过确认提示 |
 | `--gpu-num` | 否 | GPU 卡数（默认使用模板配置） |
 | `--dry-run` | 否 | 仅生成计划，不执行上传和创建 |

@@ -176,7 +176,7 @@ export function registerTrainSubmitCommand(trainCmd: Command) {
     .command("submit")
     .description("Upload bundle to COS and create a new training job. The template ID is read from the bundle manifest or --template-id.")
     .requiredOption("--bundle <dir>", "Prepared bundle directory")
-    .option("--template-id <id>", "Template job ID — override the template ID from bundle manifest")
+    .option("--template-id <id>", "Internal numeric job ID (jobInternalId) of an existing training job to use as template for COS prefix and config. NOT the full taskId string — it's the numeric ID like 92380. Find it in: (1) taiji-output/jobs.json → jobsById[taskId].jobInternalId, (2) taiji-output/submit-live/*/plan.json → templateJobInternalId, (3) taiji-output/submit-bundle/manifest.json → templateJobId (then look up its internalId in jobs.json). Examples: \"token-specific-q\" has internalId 92380, \"TAAC_stat_cross\" has 92437.")
     .option("--gpu-num <n>", "Number of GPUs (default: from template)")
     .option("--yes", "Skip confirmation prompt", false)
     .option("--dry-run", "Preview without uploading", false)

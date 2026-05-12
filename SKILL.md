@@ -48,7 +48,7 @@ Pure local operation, no API calls.
 taac2026 train prepare \
   --name <task-name> \
   --source <source-dir> \
-  [--template-id <template-task-id>] \
+  [--template-id <internal-job-id>] \
   [--description <desc>] \
   [--include "*.py,*.sh"] \
   [--exclude "*.pyc,__pycache__"] \
@@ -59,7 +59,7 @@ taac2026 train prepare \
 - **Always includes** `inference/` subdirectory
 - **Excludes** `__pycache__`, `*.pyc`, `*.egg-info`, `.git`, `.DS_Store`, `inference/` (top-level) by default
 - **Outputs** in the bundle directory:
-  - `manifest.json` — template ID, task name, file list, git info
+  - `manifest.json` — template internal job ID, task name, file list, git info
   - `NEXT_STEPS.md` — next steps guide
   - `files/` — source file copies (relative paths preserved)
 
@@ -68,7 +68,7 @@ taac2026 train prepare \
 ```bash
 taac2026 train submit \
   --bundle <bundle-dir> \
-  [--template-id <template-id>] \
+  [--template-id <internal-job-id>] \
   [--gpu-num <gpu-count>] \
   [--yes] \
   [--dry-run] \
@@ -83,7 +83,7 @@ taac2026 train submit \
 - **Outputs**:
   - `plan.json` — execution plan (upload list, COS paths, creation params)
   - `result.json` — execution result (taskId, upload details, creation response)
-- `--template-id` is required only if not present in `manifest.json`
+- `--template-id` (numeric jobInternalId like `92380`, not the full taskId) is required only if not present in `manifest.json`
 
 #### `train run` — Start training
 
@@ -351,7 +351,7 @@ taiji-output/
 taac2026 train prepare --name my-model --source ./my-model-src
 
 # 2. Upload and create task (use template-id if not in manifest)
-taac2026 train submit --bundle submit-bundle --template-id angel_training_ams_xxx
+taac2026 train submit --bundle submit-bundle --template-id 92380
 
 # 3. Start training
 taac2026 train run --task-id $(cat taiji-output/submit-live/*/result.json | jq -r '.taskId')
